@@ -1,6 +1,6 @@
 # 0018. Tokens in sessionStorage (per tab)
 
-Status: Accepted (amends 0015: where the frontend keeps the tokens).
+Status: Superseded by 0019 (tokens now live in HttpOnly cookies). Was: Accepted (amends 0015: where the frontend keeps the tokens).
 
 ## Context
 ADR 0015 kept both tokens in JavaScript memory only, so reloading the page signed the user out. The owner tests with an admin, a manager and a contributor open in the same browser and was signed out of each on every refresh.

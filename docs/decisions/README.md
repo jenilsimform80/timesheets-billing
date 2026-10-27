@@ -29,10 +29,11 @@ Consequences: trade-offs and follow-ups
 | 0012 | [Admin-only user administration](0012-admin-user-creation.md) | Accepted |
 | 0013 | [OpenAPI document and Swagger UI](0013-openapi-swagger-ui.md) | Accepted |
 | 0014 | [Restricted projects, task assignment and manager hierarchy](0014-project-access-and-task-assignment.md) | Accepted |
-| 0015 | [Bearer-token authentication (JWT + rotating refresh token)](0015-bearer-token-authentication.md) | Accepted (supersedes cookie part of 0003) |
+| 0015 | [Bearer-token authentication (JWT + rotating refresh token)](0015-bearer-token-authentication.md) | Accepted (supersedes cookie part of 0003; transport superseded by 0019) |
 | 0016 | [Admin approves when the owner has no usable manager](0016-admin-approval-fallback.md) | Accepted (amends 0004) |
 | 0017 | [Forgotten passwords: admin-assisted reset](0017-forgotten-password-recovery.md) | Accepted (extends 0012) |
-| 0018 | [Tokens in per-tab sessionStorage](0018-per-tab-token-storage.md) | Accepted (amends 0015) |
+| 0018 | [Tokens in per-tab sessionStorage](0018-per-tab-token-storage.md) | Superseded by 0019 |
+| 0019 | [Tokens in HttpOnly cookies](0019-httponly-cookie-tokens.md) | Accepted (supersedes 0018 and the bearer transport of 0015) |
 
 No further decisions are planned.
 

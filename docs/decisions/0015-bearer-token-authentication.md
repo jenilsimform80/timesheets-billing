@@ -1,6 +1,6 @@
 # 0015. Bearer-token authentication (JWT access token + rotating refresh token)
 
-Status: Accepted (added after Phase 10 at the owner's request; awaiting review). Supersedes the cookie part of ADR 0003 and the cookie hardening in ADR 0010 (`__Host-sid`, `Vary: Cookie`, Origin check).
+Status: Accepted (added after Phase 10 at the owner's request; awaiting review). **Transport superseded by ADR 0019: the tokens now travel in HttpOnly cookies, not the `Authorization` header and not JavaScript storage; the JWT + rotating refresh + live session check design below still holds.** Supersedes the cookie part of ADR 0003 and the cookie hardening in ADR 0010 (`__Host-sid`, `Vary: Cookie`, Origin check).
 
 ## Context
 Authentication used an HttpOnly session cookie. The owner asked for bearer tokens: `Authorization: Bearer <token>`, a JWT access token plus a refresh token, kept in memory by the frontend.

@@ -17,7 +17,7 @@ Status: Phase 9 — integrated system reviewed and hardened (ADR 0003–0010). S
 | Input | Injection, oversized or malformed input | Zod validation, parameterized SQL (1+) |
 | Errors | Information leakage | Central error handler, generic 500 (1) |
 | Audit | Missing or tamperable records | **Implemented (5):** same-transaction writes + append-only trigger |
-| Web | XSS/CSRF/CORS | helmet, CORS allow-list; no cookie auth, so no CSRF surface (1, 3, 9; ADR 0015) |
+| Web | XSS/CSRF/CORS | helmet, CORS allow-list with credentials for the allow-listed origins only; HttpOnly cookie auth + SameSite=Lax + Origin check for CSRF (1, 3, 9; ADR 0019) |
 
 ## Open decisions
 Unlock policy and who may unlock (Phase 5).
@@ -31,7 +31,8 @@ Unlock policy and who may unlock (Phase 5).
 | `JWT_SECRET` required, min 32 chars | `config/env.ts` | `hardening.test.ts`, `env.test.ts` |
 | Uniform login error (no user enumeration), timing equalization | `auth.service.ts` | `auth.test.ts` |
 | Login throttling (failed attempts per IP) | `routes/auth.routes.ts` | `auth.test.ts` |
-| No ambient credentials (no cookies), so no CSRF; cookies are ignored | `middleware/authenticate.ts` | `auth.test.ts`, `hardening.test.ts`, e2e `security.spec.ts` |
+| Tokens only in HttpOnly, SameSite=Lax cookies (`__Host-at` / `__Secure-rt`, Secure in production); never in a body or JS storage; `Authorization: Bearer` refused | `auth/auth-cookies.ts`, `middleware/authenticate.ts` | `auth.test.ts`, `hardening.test.ts`, e2e `security.spec.ts` |
+| CSRF: Origin allow-list on every state-changing request (on top of SameSite=Lax) | `middleware/origin-check.ts` | `auth.test.ts`, e2e `security.spec.ts`, `scripts/walkthrough.sh` |
 | Role gate and 401 for anonymous | `middleware/authenticate.ts`, `authorize.ts` | `authorization.test.ts` |
 | Ownership / direct-report scoping in the query (IDOR-safe), uniform 404 | `authorization/policies.ts`, `authorization.service.ts` | `authorization.test.ts` |
 | Only the owner's direct manager may decide a submission | `assertCanDecideSubmission` | `submission-approval-policy.test.ts` |
@@ -92,15 +93,15 @@ An independent read-only review produced 8 findings; each was reproduced by a fa
 
 ## Frontend notes (Phase 7)
 - The UI is never a security boundary; all permission and lock rules stay on the backend.
-- Tokens are in per-tab **sessionStorage** (ADR 0018; never localStorage or cookies), so XSS could read and carry them away; the strict CSP, short access tokens and rotating single-use refresh tokens limit that. A reload keeps the session; a new tab does not share it.
-- CORS lists `FRONTEND_URL` (without credentials). There is no Origin check: with no cookies there is no CSRF to block.
+- Tokens are in **HttpOnly cookies** (ADR 0019): JavaScript, and therefore XSS, cannot read them, and they never reach web storage. An XSS can still make requests from the victim's open tab, so the strict CSP and React's escaping stay essential. A reload and every tab of the browser profile share the session (one login per profile; use separate profiles to test several roles).
+- CORS lists `FRONTEND_URL` with credentials; state-changing requests from any other `Origin` get 403 (CSRF defence in depth on top of `SameSite=Lax`).
 - Users only see backend messages (`ApiError.message`) or a fixed generic text; raw exceptions and non-JSON error bodies are never rendered (tested).
 - Build output includes source maps (`build.sourcemap`) for timesheets-billing; disable for a public deployment.
 - Only `VITE_*` variables reach browser code; none holds a secret.
 
 ## Frontend notes (Phase 8)
 - **UI mirrors, backend enforces.** Role-based navigation and "no access" pages are conveniences. Verified in a real browser: a direct `fetch` from the signed-in contributor's own session to write in a locked month was refused by the API (409 `PERIOD_LOCKED`) even though the UI hides the controls.
-- **Session handling (ADR 0015):** bearer tokens kept in memory; the client makes one silent refresh on a 401 and replays the request, and a central handler drops the user if that fails; sign-out only forgets the user after the server confirmed (a failed logout leaves the user signed in with an error, because the session may still be valid); return-after-login accepts only same-app paths (no open redirect).
+- **Session handling (ADR 0015, 0019):** the tokens are HttpOnly cookies the app never sees (it asks `/auth/me` who is signed in); the client makes one silent refresh on a 401 and replays the request, and a central handler drops the user if that fails; sign-out only forgets the user after the server confirmed (a failed logout leaves the user signed in with an error, because the session may still be valid); return-after-login accepts only same-app paths (no open redirect).
 - **No sensitive text rendered from errors:** users see `ApiError.message` (backend text) or a fixed generic message; non-JSON error bodies and exception text are never shown.
 - **Inputs:** client validation is for feedback only; backend field errors are mapped onto the form. Free text (notes, comments, reasons) is rendered as text by React (no `dangerouslySetInnerHTML` anywhere).
 - Known gaps: no audit-trail or user-administration screen; source maps are emitted in production builds.

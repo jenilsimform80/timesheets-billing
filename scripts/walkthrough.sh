@@ -32,23 +32,22 @@ note() { printf '   %s\n' "$*"; }
 pass() { printf '   \033[32m✓\033[0m %s\n' "$*"; }
 fail() { printf '   \033[31m✗ %s\033[0m\n' "$*"; FAILED=1; }
 
-# call ROLE METHOD PATH [JSON]  ->  sets STATUS and BODY. The access token is kept per role and sent as
-# `Authorization: Bearer ...` (there are no cookies).
+# call ROLE METHOD PATH [JSON] [EXTRA_HEADER]  ->  sets STATUS and BODY. Each role has its own cookie
+# jar (like a separate browser profile): login stores the HttpOnly token cookies there and curl sends
+# them back on later calls. An empty ROLE is an anonymous caller (an always-empty jar).
 call() {
-  local role=$1 method=$2 path=$3 data=${4:-} token=""
-  [[ -f "$DIR/$role.token" ]] && token=$(cat "$DIR/$role.token")
+  local role=${1:-anon} method=$2 path=$3 data=${4:-} extra=${5:-}
+  local jar="$DIR/$role.jar"
   local args=(-s -o "$DIR/body" -w '%{http_code}' -X "$method" "$BASE_URL$path" -H 'Accept: application/json')
-  [[ -n "$token" ]] && args+=(-H "Authorization: Bearer $token")
+  [[ "$role" == anon ]] && : > "$jar" || args+=(-c "$jar")
+  args+=(-b "$jar")
+  [[ -n "$extra" ]] && args+=(-H "$extra")
   [[ -n "$data" ]] && args+=(-H 'Content-Type: application/json' -d "$data")
   STATUS=$(curl "${args[@]}"); BODY=$(cat "$DIR/body")
-  # remember the access/refresh token if the response carries one (login / refresh)
-  local access refresh
-  access=$(jq -r '.accessToken // empty' <<<"$BODY" 2>/dev/null || true)
-  refresh=$(jq -r '.refreshToken // empty' <<<"$BODY" 2>/dev/null || true)
-  [[ -n "$access" ]] && echo "$access" > "$DIR/$role.token"
-  [[ -n "$refresh" ]] && echo "$refresh" > "$DIR/$role.refresh"
   return 0
 }
+# cookie_of ROLE REGEX  ->  "name<TAB>value" of the first cookie in the role's jar whose name matches
+cookie_of() { awk -F'\t' -v re="$2" '$6 ~ re {print $6 "\t" $7; exit}' "$DIR/$1.jar"; }
 expect() { # expect STATUS "what it proves"
   if [[ "$STATUS" == "$1" ]]; then pass "$2 (HTTP $STATUS)"; else fail "$2 - expected HTTP $1, got $STATUS: $BODY"; fi
 }
@@ -111,16 +110,15 @@ say "4. Authorization failures"
 call "" GET /api/projects; expect_code 401 UNAUTHENTICATED "anonymous request"
 call other GET "/api/time-entries/$E2"; expect 404 "another team's manager cannot even see the entry"
 call dev POST "/api/submissions/$SUB/approve" '{}'; expect 403 "a contributor cannot approve"
-call admin POST "/api/submissions/$SUB/approve" '{}'; expect 403 "an admin cannot approve (only the owner's manager can)"
+call admin POST "/api/submissions/$SUB/approve" '{}'; expect 404 "an admin cannot approve while the owner has an active manager (ADR 0016: admins are only the fallback)"
 call other POST "/api/submissions/$SUB/approve" '{}'; expect 404 "a manager outside the reporting line gets 404, not 'forbidden' (no probing)"
 call dev GET /api/audit-logs; expect 403 "audit trail is admin-only"
 call dev GET /api/reports/project-budgets; expect 403 "budget report is admin-only"
 call dev POST /api/locked-periods '{"period":"2041-01"}'; expect 403 "a contributor cannot lock a period"
-STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/api/time-entries" -H 'Origin: https://evil.example' -H 'Content-Type: application/json' -d '{}'); BODY=""
-expect 401 "a forged cross-site write carries no bearer token, so there is nothing to ride on (no ambient credentials)"
-OLD_REFRESH=$(cat "$DIR/dev.refresh")
-call dev POST /api/auth/refresh "{\"refreshToken\":\"$OLD_REFRESH\"}"; expect 200 "refresh issues a new token pair"
-call anon POST /api/auth/refresh "{\"refreshToken\":\"$OLD_REFRESH\"}"; expect_code 401 UNAUTHENTICATED "the refresh token that was just exchanged cannot be used again (rotation)"
+call dev POST /api/time-entries '{}' 'Origin: https://evil.example'; expect_code 403 FORBIDDEN "a forged cross-site write is refused even though the browser would attach the valid cookies (Origin check)"
+OLD_REFRESH=$(cookie_of dev '^(__Secure-)?rt$')
+call dev POST /api/auth/refresh; expect 200 "refresh rotates the refresh cookie and sets a new access cookie"
+call anon POST /api/auth/refresh '' "Cookie: ${OLD_REFRESH/$'\t'/=}"; expect_code 401 UNAUTHENTICATED "the refresh token that was just exchanged cannot be used again (rotation)"
 call dev GET "/api/users"; note "a contributor sees only themself: $(jq -c '[.users[].email]' <<<"$BODY")"
 
 # ---------------------------------------------------------------------------------------------------

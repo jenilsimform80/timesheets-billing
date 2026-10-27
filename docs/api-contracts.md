@@ -35,25 +35,25 @@ Swagger UI: `GET /api-docs`; OpenAPI 3.0 JSON: `GET /api-docs.json` (outside `/a
 - Added in Phase 2 (`backend/tests/health.test.ts`).
 
 ## Authentication (Phase 3)
-Bearer tokens (ADR 0015; replaces the earlier cookie session). `POST /api/auth/login` returns a short-lived JWT `accessToken` and an opaque `refreshToken`; every other protected call sends `Authorization: Bearer <accessToken>`. When it expires (`expiresIn` seconds, default 900) call `POST /api/auth/refresh`. A missing, malformed, expired, forged or revoked token is `401 UNAUTHENTICATED` with `WWW-Authenticate: Bearer`. No cookies are set or read.
+HttpOnly cookies (ADR 0019; the JWT + rotating refresh design is ADR 0015). `POST /api/auth/login` sets two cookies, both `HttpOnly; SameSite=Lax` (`Secure` in production): the short-lived JWT access token (`at`, `__Host-at` in production, `Path=/`, 15 min by default) and an opaque refresh token (`rt`, `__Secure-rt` in production, `Path=/api/auth`, absolute expiry). **No token is ever in a response body**; the browser (or a cookie-jar client such as `curl -c/-b`) sends them back. When the access cookie has expired call `POST /api/auth/refresh`. A missing, malformed, expired, forged or revoked cookie is `401 UNAUTHENTICATED`. `Authorization: Bearer` is **not** accepted. CSRF: every non-GET/HEAD/OPTIONS request carrying an `Origin` header that is not in `FRONTEND_URL` is refused with `403 FORBIDDEN` ("Origin not allowed"); requests without an `Origin` header (curl, server-to-server) pass. CORS allows credentials for the allow-listed origins only.
 
 ### POST /api/auth/change-password
-Auth: bearer. Body `{ currentPassword, newPassword (8–128) }`. 204; the user's **other** sessions are deleted; the session of the access token in use stays. 401 `UNAUTHENTICATED` (wrong current password — counts toward the failed-login rate limit), 422 (new equals current), 400 validation. Clears `mustChangePassword`. This route and `GET /api/auth/me` are the only authenticated routes usable while `mustChangePassword` is true.
+Auth: access cookie. Body `{ currentPassword, newPassword (8–128) }`. 204; the user's **other** sessions are deleted; the session of the access cookie in use stays. 401 `UNAUTHENTICATED` (wrong current password — counts toward the failed-login rate limit), 422 (new equals current), 400 validation. Clears `mustChangePassword`. This route and `GET /api/auth/me` are the only authenticated routes usable while `mustChangePassword` is true.
 
 ### POST /api/auth/login
 - Auth: none. Body: `{ "email": string, "password": string }` (email trimmed and lower-cased; password 1–128 chars).
-- 200: `{ "user": { id, email, name, role, managerId }, "tokenType": "Bearer", "accessToken": string, "expiresIn": seconds, "refreshToken": string, "refreshTokenExpiresAt": ISO date }`
+- 200: `{ "user": { id, email, name, role, managerId, mustChangePassword } }` plus the two `Set-Cookie` headers described above (access cookie `Max-Age` = `ACCESS_TOKEN_TTL_MINUTES`; refresh cookie expires at the session's absolute expiry).
 - 400 `VALIDATION_ERROR`; 401 `UNAUTHENTICATED` ("Invalid email or password" for unknown email, wrong password and inactive account alike); 429 `RATE_LIMITED` after too many failed attempts from one IP.
 
 ### POST /api/auth/refresh
-- Auth: none (the refresh token is the credential). Body `{ "refreshToken": string }` (strict). Rotates the token: 200 with the same shape as login (new `accessToken` and `refreshToken`); the old refresh token is dead from then on. The session keeps its original absolute expiry (`SESSION_TTL_HOURS`).
-- 401 `UNAUTHENTICATED` for an unknown, already-used or expired token or a deactivated user; 400 validation; 429 (shares the per-IP attempt cap with login).
+- Auth: none (the refresh cookie is the credential; **no request body**). Rotates the token: 200 `{ "user" }` with new `Set-Cookie` headers; the old refresh token is dead from then on. The session keeps its original absolute expiry (`SESSION_TTL_HOURS`).
+- 401 `UNAUTHENTICATED` for a missing, unknown, already-used or expired refresh cookie or a deactivated user (both cookies are cleared in the response); 429 (shares the per-IP attempt cap with login).
 
 ### POST /api/auth/logout
-- Auth: none required (idempotent). Body `{ "refreshToken": string }`. Deletes the server-side session: the access token stops working at once too. 204, even for an unknown token.
+- Auth: none required (idempotent; no request body). Deletes the server-side session identified by the refresh cookie, so the access cookie stops working at once too, and clears both cookies. 204, even without a cookie or with an unknown one.
 
 ### GET /api/auth/me
-- Auth: bearer. 200 `{ "user": {…} }`; 401 `UNAUTHENTICATED`.
+- Auth: access cookie. 200 `{ "user": {…} }`; 401 `UNAUTHENTICATED`.
 
 ## Users (Phase 3 scoping rules; admin user creation added after Phase 10, ADR 0012)
 All routes require a session (401 otherwise). Scope by role:
@@ -224,4 +224,4 @@ Query: `projectId` (uuid), `through` (`YYYY-MM-DD`: count hours up to and includ
 - **All responses** carry `Cache-Control: no-store` and `Vary: Authorization`; there is no `ETag`.
 - **NUL characters** (`\u0000`, or `%00` in a URL) anywhere in a request are rejected with 400 `VALIDATION_ERROR` (PostgreSQL cannot store them).
 - **`GET /api/projects` and `GET /api/projects/:id`:** `budgetHours` is **omitted for non-admins** (admins, and the responses of project create/update, include it).
-- **`POST /api/auth/login`:** besides the failed-attempts limit (429 `RATE_LIMITED`, "Too many failed login attempts…"), all attempts per IP are capped (429 `RATE_LIMITED`, "Too many login attempts…"). (Superseded by ADR 0015: there are no cookies any more.)
+- **`POST /api/auth/login`:** besides the failed-attempts limit (429 `RATE_LIMITED`, "Too many failed login attempts…"), all attempts per IP are capped (429 `RATE_LIMITED`, "Too many login attempts…"). (Cookie details superseded by ADR 0015, then restored in ADR 0019.)
