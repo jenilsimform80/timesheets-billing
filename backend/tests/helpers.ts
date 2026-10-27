@@ -80,12 +80,31 @@ export async function resetDatabase(prisma: PrismaClient): Promise<void> {
   await prisma.user.deleteMany();
 }
 
-/** Logs in with the shared test password and returns the `Bearer <access token>` header value. */
+/** The `name=value` pairs of every Set-Cookie header on a response, by cookie name. */
+export function setCookies(res: { headers: Record<string, unknown> }): Record<string, string> {
+  const raw = res.headers['set-cookie'];
+  const list = Array.isArray(raw) ? (raw as string[]) : [];
+  return Object.fromEntries(
+    list.map((line) => {
+      const pair = line.split(';')[0] ?? '';
+      const eq = pair.indexOf('=');
+      return [pair.slice(0, eq), pair.slice(eq + 1)];
+    }),
+  );
+}
+
+/** The `Cookie` request-header value that carries a login's access token (test env: cookie `at`). */
+export function accessCookie(res: { headers: Record<string, unknown> }): string {
+  const value = setCookies(res)['at'];
+  if (!value) throw new Error('no access cookie in response');
+  return `at=${value}`;
+}
+
+/** Logs in with the shared test password and returns the `Cookie` header value for later calls. */
 export async function loginToken(app: Express, email: string): Promise<string> {
   const res = await request(app).post('/api/auth/login').send({ email, password: TEST_PASSWORD });
-  const token = (res.body as { accessToken?: string }).accessToken;
-  if (!token) throw new Error(`login failed for ${email}: ${res.status}`);
-  return `Bearer ${token}`;
+  if (res.status !== 200) throw new Error(`login failed for ${email}: ${res.status}`);
+  return accessCookie(res);
 }
 
 export async function createProjectWithTask(

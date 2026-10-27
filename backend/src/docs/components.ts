@@ -299,20 +299,6 @@ function envelopes(entries: [name: string, key: string, item: string, many: bool
     componentSchemas[name] = obj({ [key]: many ? arrayOf(ref(item)) : ref(item) });
   }
 }
-componentSchemas['TokenResult'] = obj(
-  {
-    user: ref('SessionUser'),
-    tokenType: { type: 'string', enum: ['Bearer'] },
-    accessToken: { type: 'string', description: 'JWT; send as `Authorization: Bearer ...`.' },
-    expiresIn: { type: 'integer', description: 'Seconds until the access token expires.' },
-    refreshToken: {
-      type: 'string',
-      description: 'Opaque; single use (rotated by `/auth/refresh`).',
-    },
-    refreshTokenExpiresAt: { type: 'string', format: 'date-time' },
-  },
-  ['user', 'tokenType', 'accessToken', 'expiresIn', 'refreshToken', 'refreshTokenExpiresAt'],
-);
 envelopes([
   ['SessionUserResult', 'user', 'SessionUser', false],
   ['UserResult', 'user', 'User', false],

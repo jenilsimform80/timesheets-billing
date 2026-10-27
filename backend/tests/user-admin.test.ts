@@ -35,7 +35,7 @@ afterAll(async () => {
 
 const create = (who: string | undefined, body: object) => {
   const req = request(app).post('/api/users');
-  return (who ? req.set('Authorization', cookies[who]!) : req).send(body);
+  return (who ? req.set('Cookie', cookies[who]!) : req).send(body);
 };
 const code = (res: request.Response) => (res.body as ApiErrorBody).error.code;
 const valid = (over: object = {}) => ({
@@ -118,7 +118,7 @@ describe('POST /api/users — creating accounts', () => {
   });
 
   it('shows the new user in the admin user list', async () => {
-    const res = await request(app).get('/api/users').set('Authorization', cookies['admin']!);
+    const res = await request(app).get('/api/users').set('Cookie', cookies['admin']!);
     const emails = (res.body as { users: { email: string }[] }).users.map((u) => u.email);
     expect(emails).toContain('new.dev@t.dev');
   });

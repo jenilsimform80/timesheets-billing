@@ -8,6 +8,7 @@ import {
   resetDatabase,
   TEST_PASSWORD,
   type ApiErrorBody,
+  accessCookie,
 } from './helpers.js';
 
 const prisma = createTestPrisma();
@@ -36,9 +37,9 @@ const contributor = (managerId: string, over = {}) =>
 
 const asAdmin = {
   patch: (id: string, body: object) =>
-    request(app).patch(`/api/users/${id}`).set('Authorization', adminCookie).send(body),
+    request(app).patch(`/api/users/${id}`).set('Cookie', adminCookie).send(body),
   password: (id: string, body: object) =>
-    request(app).post(`/api/users/${id}/password`).set('Authorization', adminCookie).send(body),
+    request(app).post(`/api/users/${id}/password`).set('Cookie', adminCookie).send(body),
 };
 const code = (res: request.Response) => (res.body as ApiErrorBody).error.code;
 const row = (id: string) => prisma.user.findUniqueOrThrow({ where: { id } });
@@ -54,7 +55,7 @@ describe('PATCH /api/users/:id — who may call it', () => {
     for (const cookie of [mCookie, cCookie]) {
       const res = await request(app)
         .patch(`/api/users/${c.id}`)
-        .set('Authorization', cookie)
+        .set('Cookie', cookie)
         .send({ name: 'Hacked' });
       expect(res.status).toBe(403);
     }
@@ -200,11 +201,11 @@ describe('deactivating and reactivating', () => {
     const m = await manager();
     const c = await contributor(m.id);
     const cookie = await loginToken(app, c.email);
-    expect((await request(app).get('/api/auth/me').set('Authorization', cookie)).status).toBe(200);
+    expect((await request(app).get('/api/auth/me').set('Cookie', cookie)).status).toBe(200);
 
     expect((await asAdmin.patch(c.id, { isActive: false })).status).toBe(200);
 
-    expect((await request(app).get('/api/auth/me').set('Authorization', cookie)).status).toBe(401);
+    expect((await request(app).get('/api/auth/me').set('Cookie', cookie)).status).toBe(401);
     expect(await prisma.session.count({ where: { userId: c.id } })).toBe(0);
     const login = await request(app)
       .post('/api/auth/login')
@@ -238,7 +239,7 @@ describe('POST /api/users/:id/password (admin reset)', () => {
     expect((await request(app).post(`/api/users/${c.id}/password`).send({})).status).toBe(401);
     const res = await request(app)
       .post(`/api/users/${c.id}/password`)
-      .set('Authorization', cookie)
+      .set('Cookie', cookie)
       .send({ password: NEW_PASSWORD });
     expect(res.status).toBe(403);
   });
@@ -250,9 +251,7 @@ describe('POST /api/users/:id/password (admin reset)', () => {
 
     expect((await asAdmin.password(c.id, { password: NEW_PASSWORD })).status).toBe(204);
 
-    expect((await request(app).get('/api/auth/me').set('Authorization', oldCookie)).status).toBe(
-      401,
-    );
+    expect((await request(app).get('/api/auth/me').set('Cookie', oldCookie)).status).toBe(401);
     const old = await request(app)
       .post('/api/auth/login')
       .send({ email: c.email, password: TEST_PASSWORD });
@@ -283,7 +282,7 @@ describe('forced password change after an admin reset', () => {
     const res = await request(app)
       .post('/api/auth/login')
       .send({ email: c.email, password: NEW_PASSWORD });
-    return { c, cookie: `Bearer ${(res.body as { accessToken: string }).accessToken}`, res };
+    return { c, cookie: accessCookie(res), res };
   };
 
   it('flags the user at login and refuses every route except /me and change-password', async () => {
@@ -291,9 +290,9 @@ describe('forced password change after an admin reset', () => {
     expect((res.body as { user: { mustChangePassword: boolean } }).user.mustChangePassword).toBe(
       true,
     );
-    expect((await request(app).get('/api/auth/me').set('Authorization', cookie)).status).toBe(200);
+    expect((await request(app).get('/api/auth/me').set('Cookie', cookie)).status).toBe(200);
     for (const path of ['/api/projects', '/api/timesheets/2026-03-02', '/api/submissions']) {
-      const blocked = await request(app).get(path).set('Authorization', cookie);
+      const blocked = await request(app).get(path).set('Cookie', cookie);
       expect(blocked.status, path).toBe(403);
       expect((blocked.body as ApiErrorBody).error.code).toBe('PASSWORD_CHANGE_REQUIRED');
     }
@@ -303,10 +302,10 @@ describe('forced password change after an admin reset', () => {
     const { c, cookie } = await loginAfterReset();
     const changed = await request(app)
       .post('/api/auth/change-password')
-      .set('Authorization', cookie)
+      .set('Cookie', cookie)
       .send({ currentPassword: NEW_PASSWORD, newPassword: 'My-Own-Password-9' });
     expect(changed.status).toBe(204);
-    expect((await request(app).get('/api/projects').set('Authorization', cookie)).status).toBe(200);
+    expect((await request(app).get('/api/projects').set('Cookie', cookie)).status).toBe(200);
     expect((await prisma.user.findUniqueOrThrow({ where: { id: c.id } })).mustChangePassword).toBe(
       false,
     );
@@ -338,7 +337,7 @@ describe('forced password change after an admin reset', () => {
 describe('POST /api/auth/change-password (self)', () => {
   const change = (cookie: string | undefined, body: object) => {
     const req = request(app).post('/api/auth/change-password');
-    return (cookie ? req.set('Authorization', cookie) : req).send(body);
+    return (cookie ? req.set('Cookie', cookie) : req).send(body);
   };
 
   it('requires a session', async () => {
@@ -381,10 +380,8 @@ describe('POST /api/auth/change-password (self)', () => {
     const res = await change(here, { currentPassword: TEST_PASSWORD, newPassword: NEW_PASSWORD });
     expect(res.status).toBe(204);
 
-    expect((await request(app).get('/api/auth/me').set('Authorization', here)).status).toBe(200);
-    expect((await request(app).get('/api/auth/me').set('Authorization', elsewhere)).status).toBe(
-      401,
-    );
+    expect((await request(app).get('/api/auth/me').set('Cookie', here)).status).toBe(200);
+    expect((await request(app).get('/api/auth/me').set('Cookie', elsewhere)).status).toBe(401);
     expect(
       (await request(app).post('/api/auth/login').send({ email: m.email, password: TEST_PASSWORD }))
         .status,

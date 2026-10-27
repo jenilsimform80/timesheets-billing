@@ -45,11 +45,11 @@ afterAll(async () => {
 });
 
 const as = (who: string) => ({
-  get: (path: string) => request(app).get(path).set('Authorization', cookies[who]!),
+  get: (path: string) => request(app).get(path).set('Cookie', cookies[who]!),
   post: (path: string, body?: object) =>
-    request(app).post(path).set('Authorization', cookies[who]!).send(body),
+    request(app).post(path).set('Cookie', cookies[who]!).send(body),
   patch: (path: string, body?: object) =>
-    request(app).patch(path).set('Authorization', cookies[who]!).send(body),
+    request(app).patch(path).set('Cookie', cookies[who]!).send(body),
 });
 const code = (res: request.Response) => (res.body as ApiErrorBody).error.code;
 

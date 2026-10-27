@@ -65,12 +65,12 @@ afterAll(async () => {
 });
 
 const as = (who: string) => ({
-  get: (path: string) => request(app).get(path).set('Authorization', ctx.cookies[who]!),
+  get: (path: string) => request(app).get(path).set('Cookie', ctx.cookies[who]!),
   post: (path: string, body?: object) =>
-    request(app).post(path).set('Authorization', ctx.cookies[who]!).send(body),
+    request(app).post(path).set('Cookie', ctx.cookies[who]!).send(body),
   patch: (path: string, body?: object) =>
-    request(app).patch(path).set('Authorization', ctx.cookies[who]!).send(body),
-  del: (path: string) => request(app).delete(path).set('Authorization', ctx.cookies[who]!),
+    request(app).patch(path).set('Cookie', ctx.cookies[who]!).send(body),
+  del: (path: string) => request(app).delete(path).set('Cookie', ctx.cookies[who]!),
 });
 
 const body = (overrides: Record<string, unknown> = {}) => ({

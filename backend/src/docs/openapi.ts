@@ -58,7 +58,7 @@ function buildOperation(op: OperationSpec): Json {
   const errors: Record<number, string> = {};
   if (request) errors[400] = 'Validation failed (`details` lists `{location, path, message}`).';
   if (op.access !== 'public')
-    errors[401] = 'Missing, invalid or expired bearer token (`UNAUTHENTICATED`).';
+    errors[401] = 'Missing, invalid or expired access cookie (`UNAUTHENTICATED`).';
   if (op.access === 'MANAGER' || op.access === 'ADMIN' || op.access === 'ADMIN_OR_MANAGER') {
     errors[403] = 'Your role is not allowed to do this (`FORBIDDEN`).';
   }
@@ -71,7 +71,7 @@ function buildOperation(op: OperationSpec): Json {
     tags: [op.tag],
     summary: op.summary,
     description: [ACCESS_TEXT[op.access], op.description].filter(Boolean).join('\n\n'),
-    security: op.access === 'public' ? [] : [{ bearerAuth: [] }],
+    security: op.access === 'public' ? [] : [{ cookieAuth: [] }],
     ...(parameters.length > 0 && { parameters }),
     ...(request?.body && {
       requestBody: {
@@ -101,7 +101,7 @@ export function buildOpenApiDocument(): Json {
       description: [
         'REST API for logging hours, weekly submission and approval, billing-period locking and reports.',
         '',
-        '**Authentication.** Bearer tokens. Call `POST /auth/login` to get a short-lived JWT `accessToken` and a `refreshToken`. Send `Authorization: Bearer <accessToken>` on every other call (paste the access token into *Authorize*). When it expires (`expiresIn` seconds), call `POST /auth/refresh` with the refresh token; that returns a new pair and the old refresh token stops working. `POST /auth/logout` ends the session.',
+        '**Authentication.** HttpOnly cookies. `POST /auth/login` sets a short-lived access cookie (a JWT) and a refresh cookie; the browser sends them automatically (use *Try it out* after signing in, or a cookie jar with curl). When the access cookie expires, `POST /auth/refresh` rotates the refresh cookie and sets a new access cookie; the old refresh token stops working. `POST /auth/logout` ends the session and clears both cookies. State-changing requests from a browser must come from an allow-listed Origin (CSRF defence). `Authorization: Bearer` is not accepted.',
         '',
         '**Errors.** Every error is `{ "error": { "code", "message", "details"? } }`. Any endpoint can also return 413/415 (oversized or unsupported body), 500 (generic, no internals) or 503 (transient database condition; safe to retry).',
         '',
@@ -114,12 +114,12 @@ export function buildOpenApiDocument(): Json {
     components: {
       schemas: componentSchemas,
       securitySchemes: {
-        bearerAuth: {
-          type: 'http',
-          scheme: 'bearer',
-          bearerFormat: 'JWT',
+        cookieAuth: {
+          type: 'apiKey',
+          in: 'cookie',
+          name: 'at',
           description:
-            'Short-lived access token from `POST /auth/login` or `POST /auth/refresh`. Also checked against its server-side session on every request, so logout and deactivation take effect immediately.',
+            'HttpOnly access-token cookie set by `POST /auth/login` or `POST /auth/refresh` (named `__Host-at` in production). Also checked against its server-side session on every request, so logout and deactivation take effect immediately.',
         },
       },
     },

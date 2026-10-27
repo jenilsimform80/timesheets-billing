@@ -29,17 +29,17 @@ afterAll(async () => {
 });
 
 describe('authenticated responses must not be cached (finding 3)', () => {
-  it('sets no-store and Vary: Authorization on API responses, success and error alike', async () => {
+  it('sets no-store and Vary: Cookie on API responses, success and error alike', async () => {
     const app = buildTestApp(prisma);
     const cookie = await loginToken(app, 'admin@t.dev');
 
-    const ok = await request(app).get('/api/projects').set('Authorization', cookie);
+    const ok = await request(app).get('/api/projects').set('Cookie', cookie);
     const denied = await request(app).get('/api/projects');
     const notFound = await request(app).get('/api/nope');
 
     for (const res of [ok, denied, notFound]) {
       expect(res.headers['cache-control']).toBe('no-store');
-      expect(String(res.headers['vary'])).toMatch(/Authorization/i);
+      expect(String(res.headers['vary'])).toMatch(/Cookie/i);
     }
     expect(ok.status).toBe(200);
   });
@@ -48,7 +48,7 @@ describe('authenticated responses must not be cached (finding 3)', () => {
     const app = buildTestApp(prisma);
     const cookie = await loginToken(app, 'admin@t.dev');
 
-    const res = await request(app).get('/api/projects').set('Authorization', cookie);
+    const res = await request(app).get('/api/projects').set('Cookie', cookie);
 
     expect(res.headers['etag']).toBeUndefined();
   });
@@ -65,18 +65,32 @@ describe('fail-safe environment (finding 2)', () => {
   });
 });
 
-describe('credentials are not ambient (no cookies)', () => {
-  it('never sets a cookie, and ignores a session cookie sent by a browser', async () => {
+describe('token cookies in production (finding P3: fail-safe Secure/__Host- default)', () => {
+  it('a missing NODE_ENV means production: Secure __Host- cookies, never the plain dev names', async () => {
+    expect(loadEnv({ DATABASE_URL: DB, JWT_SECRET: SECRET }).NODE_ENV).toBe('production');
     const app = buildTestApp(prisma, { NODE_ENV: 'production' });
+
     const login = await request(app)
       .post('/api/auth/login')
       .send({ email: 'dev@t.dev', password: TEST_PASSWORD });
-    const token = (login.body as { accessToken: string }).accessToken;
 
-    const viaCookie = await request(app).get('/api/auth/me').set('Cookie', `sid=${token}`);
+    const lines = login.headers['set-cookie'] as unknown as string[];
+    expect(lines.map((l) => l.split('=')[0]).sort()).toEqual(['__Host-at', '__Secure-rt']);
+    for (const line of lines) expect(line).toMatch(/; Secure/);
+    expect(JSON.stringify(login.body)).not.toMatch(/eyJ/); // no JWT in the body
+  });
 
-    expect(login.headers['set-cookie']).toBeUndefined();
-    expect(viaCookie.status).toBe(401);
+  it('a cookie tossed under the plain name is ignored in production', async () => {
+    const app = buildTestApp(prisma, { NODE_ENV: 'production' });
+    const dev = buildTestApp(prisma);
+    const real = await request(dev)
+      .post('/api/auth/login')
+      .send({ email: 'dev@t.dev', password: TEST_PASSWORD });
+    const token = (real.headers['set-cookie'] as unknown as string[])[0]!.split(';')[0]!;
+
+    const res = await request(app).get('/api/auth/me').set('Cookie', token);
+
+    expect(res.status).toBe(401);
   });
 });
 
@@ -147,18 +161,16 @@ describe('project budgets are admin information (finding 6)', () => {
     const ma = await loginToken(app, 'ma@t.dev');
     const id = (await prisma.project.findUniqueOrThrow({ where: { code: 'P1' } })).id;
 
-    const adminList = (await request(app).get('/api/projects').set('Authorization', admin))
-      .body as {
+    const adminList = (await request(app).get('/api/projects').set('Cookie', admin)).body as {
       projects: Record<string, unknown>[];
     };
     expect(adminList.projects[0]).toMatchObject({ budgetHours: 250, code: 'P1' });
 
     for (const cookie of [dev, ma]) {
-      const list = (await request(app).get('/api/projects').set('Authorization', cookie)).body as {
+      const list = (await request(app).get('/api/projects').set('Cookie', cookie)).body as {
         projects: Record<string, unknown>[];
       };
-      const one = (await request(app).get(`/api/projects/${id}`).set('Authorization', cookie))
-        .body as {
+      const one = (await request(app).get(`/api/projects/${id}`).set('Cookie', cookie)).body as {
         project: Record<string, unknown>;
       };
       expect(list.projects[0]).toMatchObject({ code: 'P1', name: 'Project P1' });

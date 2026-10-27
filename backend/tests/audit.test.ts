@@ -55,9 +55,9 @@ afterAll(async () => {
 });
 
 const as = (who: Who) => ({
-  get: (path: string) => request(app).get(path).set('Authorization', cookies[who]),
+  get: (path: string) => request(app).get(path).set('Cookie', cookies[who]),
   post: (path: string, body?: object) =>
-    request(app).post(path).set('Authorization', cookies[who]).send(body),
+    request(app).post(path).set('Cookie', cookies[who]).send(body),
 });
 const auditRows = (where = {}) =>
   prisma.auditLog.findMany({ where, orderBy: { createdAt: 'asc' } });

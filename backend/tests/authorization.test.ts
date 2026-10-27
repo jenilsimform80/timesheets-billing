@@ -7,6 +7,7 @@ import {
   resetDatabase,
   TEST_PASSWORD,
   type ApiErrorBody,
+  accessCookie,
 } from './helpers.js';
 
 const prisma = createTestPrisma();
@@ -18,7 +19,7 @@ const cookies: Record<string, string> = {};
 
 async function loginToken(email: string): Promise<string> {
   const res = await request(app).post('/api/auth/login').send({ email, password: TEST_PASSWORD });
-  return `Bearer ${(res.body as { accessToken: string }).accessToken}`;
+  return accessCookie(res);
 }
 
 beforeAll(async () => {
@@ -48,7 +49,7 @@ afterAll(async () => {
 
 const get = (path: string, who?: string) => {
   const req = request(app).get(path);
-  return who ? req.set('Authorization', cookies[who]!) : req;
+  return who ? req.set('Cookie', cookies[who]!) : req;
 };
 const emailsOf = (res: request.Response) =>
   (res.body as { users: { email: string }[] }).users.map((u) => u.email).sort();

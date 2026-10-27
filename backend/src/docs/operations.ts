@@ -1,10 +1,5 @@
 import type { ZodType } from 'zod';
-import {
-  changePasswordSchemas,
-  loginSchemas,
-  logoutSchemas,
-  refreshSchemas,
-} from '../validation/auth.schemas.js';
+import { changePasswordSchemas, loginSchemas } from '../validation/auth.schemas.js';
 import { listAuditSchemas } from '../validation/audit.schemas.js';
 import { lockPeriodSchemas, unlockPeriodSchemas } from '../validation/locked-periods.schemas.js';
 import {
@@ -92,15 +87,15 @@ export const operations: OperationSpec[] = [
     method: 'post',
     path: '/auth/login',
     tag: 'Auth',
-    summary: 'Sign in (returns a bearer access token and a refresh token)',
+    summary: 'Sign in (sets the HttpOnly token cookies)',
     description:
-      'Send the returned `accessToken` as `Authorization: Bearer ...` on later calls. A wrong password, unknown email and deactivated account give the **same** 401. Failed attempts are rate-limited per IP.',
+      'The access and refresh tokens are set as HttpOnly cookies (never in the body); the browser sends them on later calls. A wrong password, unknown email and deactivated account give the **same** 401. Failed attempts are rate-limited per IP.',
     access: 'public',
     request: { body: loginSchemas.body },
     success: {
       status: 200,
-      description: 'Signed in. Contains the access and refresh tokens.',
-      schema: 'TokenResult',
+      description: 'Signed in. Sets the access and refresh cookies; the body has only the user.',
+      schema: 'SessionUserResult',
     },
     errors: {
       401: 'Invalid email or password.',
@@ -111,14 +106,17 @@ export const operations: OperationSpec[] = [
     method: 'post',
     path: '/auth/refresh',
     tag: 'Auth',
-    summary: 'Exchange a refresh token for a new token pair',
+    summary: 'Rotate the refresh cookie and get a new access cookie',
     description:
-      'Rotation: the presented refresh token is replaced and can never be used again. The session keeps its original absolute expiry. Counts toward the per-IP login attempt limit.',
+      'Reads the refresh token from its cookie (no body). Rotation: the presented refresh token is replaced and can never be used again. The session keeps its original absolute expiry. Counts toward the per-IP login attempt limit.',
     access: 'public',
-    request: { body: refreshSchemas.body },
-    success: { status: 200, description: 'New access and refresh tokens.', schema: 'TokenResult' },
+    success: {
+      status: 200,
+      description: 'New access and refresh cookies are set.',
+      schema: 'SessionUserResult',
+    },
     errors: {
-      401: 'Unknown, already-used or expired refresh token, or the user is deactivated.',
+      401: 'Missing, unknown, already-used or expired refresh cookie, or the user is deactivated. Both cookies are cleared.',
       429: 'Too many attempts from this IP (`RATE_LIMITED`).',
     },
   },
@@ -128,9 +126,8 @@ export const operations: OperationSpec[] = [
     tag: 'Auth',
     summary: 'Sign out',
     description:
-      'Ends the session identified by the refresh token (the access token stops working at once). Always 204, even for an unknown token.',
+      'Ends the session identified by the refresh cookie (the access cookie stops working at once) and clears both cookies. Always 204, even without a cookie.',
     access: 'public',
-    request: { body: logoutSchemas.body },
     success: { status: 204, description: 'Signed out.' },
   },
   {

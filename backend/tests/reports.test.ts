@@ -119,7 +119,7 @@ afterAll(async () => {
 });
 
 const as = (who: Who) => ({
-  get: (path: string) => request(app).get(path).set('Authorization', cookies[who]),
+  get: (path: string) => request(app).get(path).set('Cookie', cookies[who]),
 });
 const errorOf = (res: request.Response) => (res.body as ApiErrorBody).error;
 

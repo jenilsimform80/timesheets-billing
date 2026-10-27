@@ -6,12 +6,7 @@ import { AppError } from '../errors/app-error.js';
 import type { PrismaClient } from '../generated/prisma/client.js';
 import { createAuthenticate } from '../middleware/authenticate.js';
 import { validate } from '../middleware/validate.js';
-import {
-  changePasswordSchemas,
-  loginSchemas,
-  logoutSchemas,
-  refreshSchemas,
-} from '../validation/auth.schemas.js';
+import { changePasswordSchemas, loginSchemas } from '../validation/auth.schemas.js';
 
 export function createAuthRouter(prisma: PrismaClient, env: Env): Router {
   const router = Router();
@@ -42,10 +37,10 @@ export function createAuthRouter(prisma: PrismaClient, env: Env): Router {
   });
 
   router.post('/login', attemptLimiter, loginLimiter, validate(loginSchemas), controller.postLogin);
-  // Refresh and logout take the refresh token in the body (the access token may already be expired).
+  // Refresh and logout read the refresh token from its HttpOnly cookie (the access token may already be expired).
   // Refresh is throttled by the coarse limiter too: it is a credential exchange.
-  router.post('/refresh', attemptLimiter, validate(refreshSchemas), controller.postRefresh);
-  router.post('/logout', validate(logoutSchemas), controller.postLogout);
+  router.post('/refresh', attemptLimiter, controller.postRefresh);
+  router.post('/logout', controller.postLogout);
   const authenticateAllowingReset = createAuthenticate(prisma, {
     allowPasswordChangeRequired: true,
   });

@@ -9,6 +9,7 @@ import {
   createUser,
   loginToken,
   resetDatabase,
+  setCookies,
   testEnv,
   TEST_PASSWORD,
 } from './helpers.js';
@@ -92,9 +93,11 @@ async function call(
   template: string,
   url: string,
   body?: object,
+  rawCookie?: string, // an explicit Cookie header, e.g. the refresh cookie for /auth/refresh
 ) {
   let req = request(app)[method](`/api${url}`);
-  if (who !== 'anon') req = req.set('Authorization', cookies[who]!);
+  if (who !== 'anon') req = req.set('Cookie', cookies[who]!);
+  if (rawCookie) req = req.set('Cookie', rawCookie);
   const res = body ? await req.send(body) : await req.send();
 
   const operation = doc.paths[toOpenApiPath(template)]?.[method];
@@ -165,13 +168,14 @@ describe('documentation endpoints', () => {
     expect((await request(off).get('/api-docs.json')).status).toBe(404);
   });
 
-  it('documents bearer JWT authentication', async () => {
+  it('documents HttpOnly cookie authentication (and no bearer scheme)', async () => {
     const body = (await request(app).get('/api-docs.json')).body as Doc;
-    expect(body.components.securitySchemes['bearerAuth']).toMatchObject({
-      type: 'http',
-      scheme: 'bearer',
-      bearerFormat: 'JWT',
+    expect(body.components.securitySchemes['cookieAuth']).toMatchObject({
+      type: 'apiKey',
+      in: 'cookie',
+      name: 'at',
     });
+    expect(body.components.securitySchemes['bearerAuth']).toBeUndefined();
   });
 
   it('contains no secrets or environment values', () => {
@@ -204,11 +208,11 @@ describe('specification structure', () => {
     }
   });
 
-  it('marks every operation as public or bearer-protected', () => {
+  it('marks every operation as public or cookie-protected', () => {
     for (const methods of Object.values(doc.paths)) {
       for (const op of Object.values(methods)) {
         expect(
-          op.security.length === 0 || JSON.stringify(op.security) === '[{"bearerAuth":[]}]',
+          op.security.length === 0 || JSON.stringify(op.security) === '[{"cookieAuth":[]}]',
         ).toBe(true);
       }
     }
@@ -660,19 +664,38 @@ describe('documented behaviour matches the real API', () => {
       email: 'dev@t.dev',
       password: 'Brand-New-Pass-3',
     });
-    const refreshToken = (session.body as { refreshToken: string }).refreshToken;
-    const refreshed = await call('anon', 'post', '/auth/refresh', '/auth/refresh', {
-      refreshToken,
-    });
+    const refreshToken = setCookies(session)['rt']!;
+    const refreshed = await call(
+      'anon',
+      'post',
+      '/auth/refresh',
+      '/auth/refresh',
+      undefined,
+      `rt=${refreshToken}`,
+    );
     expect(refreshed.status).toBe(200);
     expect(
-      (await call('anon', 'post', '/auth/refresh', '/auth/refresh', { refreshToken })).status,
+      (
+        await call(
+          'anon',
+          'post',
+          '/auth/refresh',
+          '/auth/refresh',
+          undefined,
+          `rt=${refreshToken}`,
+        )
+      ).status,
     ).toBe(401);
     expect(
       (
-        await call('anon', 'post', '/auth/logout', '/auth/logout', {
-          refreshToken: (refreshed.body as { refreshToken: string }).refreshToken,
-        })
+        await call(
+          'anon',
+          'post',
+          '/auth/logout',
+          '/auth/logout',
+          undefined,
+          `rt=${setCookies(refreshed)['rt']!}`,
+        )
       ).status,
     ).toBe(204);
   });

@@ -1,34 +1,13 @@
 import type { RequestHandler } from 'express';
+import { clearAuthCookies, cookieNames, readCookie, setAuthCookies } from '../auth/auth-cookies.js';
+import { AppError } from '../errors/app-error.js';
 import type { Env } from '../config/env.js';
 import type { PrismaClient } from '../generated/prisma/client.js';
 import { getValidated } from '../middleware/validate.js';
 import { requireAuth } from '../middleware/authorize.js';
-import {
-  login,
-  logout,
-  refresh,
-  type LoginResult,
-  type TokenOptions,
-} from '../services/auth.service.js';
+import { login, logout, refresh, type TokenOptions } from '../services/auth.service.js';
 import { changeOwnPassword } from '../services/user.service.js';
-import type {
-  changePasswordSchemas,
-  loginSchemas,
-  logoutSchemas,
-  refreshSchemas,
-} from '../validation/auth.schemas.js';
-
-/** The JSON body of a successful login or refresh. Tokens are returned only here, never logged. */
-function tokenResponse(result: LoginResult) {
-  return {
-    user: result.user,
-    tokenType: 'Bearer' as const,
-    accessToken: result.accessToken,
-    expiresIn: result.expiresIn,
-    refreshToken: result.refreshToken,
-    refreshTokenExpiresAt: result.refreshTokenExpiresAt.toISOString(),
-  };
-}
+import type { changePasswordSchemas, loginSchemas } from '../validation/auth.schemas.js';
 
 export function createAuthController(prisma: PrismaClient, env: Env) {
   const tokenOptions: TokenOptions = {
@@ -37,19 +16,36 @@ export function createAuthController(prisma: PrismaClient, env: Env) {
     sessionTtlHours: env.SESSION_TTL_HOURS,
   };
 
+  const names = cookieNames(env.NODE_ENV);
+
+  // Tokens travel only in HttpOnly cookies, never in the JSON body (JS must not be able to read them).
   const postLogin: RequestHandler = async (_req, res) => {
     const { body } = getValidated<typeof loginSchemas>(res);
-    res.status(200).json(tokenResponse(await login(prisma, body, tokenOptions)));
+    const result = await login(prisma, body, tokenOptions);
+    setAuthCookies(res, env.NODE_ENV, result);
+    res.status(200).json({ user: result.user });
   };
 
-  const postRefresh: RequestHandler = async (_req, res) => {
-    const { body } = getValidated<typeof refreshSchemas>(res);
-    res.status(200).json(tokenResponse(await refresh(prisma, body.refreshToken, tokenOptions)));
+  const postRefresh: RequestHandler = async (req, res) => {
+    const refreshToken = readCookie(req, names.refresh);
+    try {
+      if (!refreshToken)
+        throw new AppError('UNAUTHENTICATED', 401, 'Invalid or expired refresh token');
+      const result = await refresh(prisma, refreshToken, tokenOptions);
+      setAuthCookies(res, env.NODE_ENV, result);
+      res.status(200).json({ user: result.user });
+    } catch (error) {
+      // A dead refresh token is useless: drop both cookies so the browser stops sending them.
+      clearAuthCookies(res, env.NODE_ENV);
+      throw error;
+    }
   };
 
-  const postLogout: RequestHandler = async (_req, res) => {
-    const { body } = getValidated<typeof logoutSchemas>(res);
-    await logout(prisma, body.refreshToken);
+  // Always succeeds: sign-out is idempotent, and the cookies are cleared even if the session is gone.
+  const postLogout: RequestHandler = async (req, res) => {
+    const refreshToken = readCookie(req, names.refresh);
+    if (refreshToken) await logout(prisma, refreshToken);
+    clearAuthCookies(res, env.NODE_ENV);
     res.status(204).end();
   };
 

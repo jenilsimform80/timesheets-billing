@@ -14,8 +14,3 @@ export const changePasswordSchemas = {
     newPassword: z.string().min(MIN_PASSWORD_LENGTH).max(128),
   }),
 };
-
-// Opaque random token (base64url of 32 bytes = 43 chars); the bound only stops absurd inputs.
-const refreshTokenBody = z.strictObject({ refreshToken: z.string().min(1).max(256) });
-export const refreshSchemas = { body: refreshTokenBody };
-export const logoutSchemas = { body: refreshTokenBody };

@@ -43,7 +43,7 @@ beforeEach(async () => {
   });
   const sub = await request(app)
     .post('/api/submissions')
-    .set('Authorization', cookies.dev)
+    .set('Cookie', cookies.dev)
     .send({ weekStart: '2040-03-05' });
   expect(sub.status).toBe(201); // the fixture must be real, or the NUL tests would not reach the database layer
   submissionId = (sub.body as { submission?: { id: string } }).submission?.id ?? '';
@@ -57,12 +57,12 @@ const as = (who: Who) => ({
   post: (path: string, body?: object | string) =>
     request(app)
       .post(path)
-      .set('Authorization', cookies[who])
+      .set('Cookie', cookies[who])
       .set('Content-Type', 'application/json')
       .send(body),
   patch: (path: string, body?: object) =>
-    request(app).patch(path).set('Authorization', cookies[who]).send(body),
-  get: (path: string) => request(app).get(path).set('Authorization', cookies[who]),
+    request(app).patch(path).set('Cookie', cookies[who]).send(body),
+  get: (path: string) => request(app).get(path).set('Cookie', cookies[who]),
 });
 const errorOf = (res: request.Response) => (res.body as ApiErrorBody).error;
 
@@ -196,9 +196,7 @@ describe('other hostile payloads are 4xx, never 5xx', () => {
   });
 
   it('survives garbage credentials and odd query strings', async () => {
-    const garbage = await request(app)
-      .get('/api/auth/me')
-      .set('Authorization', 'Bearer %E0%A4%A; ;;;=');
+    const garbage = await request(app).get('/api/auth/me').set('Cookie', 'at=%E0%A4%A; ;;;=');
     const arrays = await as('admin').get(
       '/api/reports/hours?from[]=x&to=2040-01-01&groupBy=month&groupBy=project',
     );

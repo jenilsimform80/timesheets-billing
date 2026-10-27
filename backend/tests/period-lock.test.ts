@@ -46,12 +46,12 @@ afterAll(async () => {
 });
 
 const as = (who: Who) => ({
-  get: (path: string) => request(app).get(path).set('Authorization', cookies[who]),
+  get: (path: string) => request(app).get(path).set('Cookie', cookies[who]),
   post: (path: string, body?: object) =>
-    request(app).post(path).set('Authorization', cookies[who]).send(body),
+    request(app).post(path).set('Cookie', cookies[who]).send(body),
   patch: (path: string, body?: object) =>
-    request(app).patch(path).set('Authorization', cookies[who]).send(body),
-  del: (path: string) => request(app).delete(path).set('Authorization', cookies[who]),
+    request(app).patch(path).set('Cookie', cookies[who]).send(body),
+  del: (path: string) => request(app).delete(path).set('Cookie', cookies[who]),
 });
 const errorOf = (res: request.Response) => (res.body as ApiErrorBody).error;
 const lock = (period: string, who: Who = 'admin', note?: string) =>
@@ -457,7 +457,7 @@ describe('concurrency: a lock racing an edit never lets a change land after the 
         };
         for (const who of writers) writes.push(as(who).post('/api/time-entries', body));
         for (const c of extraCookies)
-          writes.push(request(app).post('/api/time-entries').set('Authorization', c).send(body));
+          writes.push(request(app).post('/api/time-entries').set('Cookie', c).send(body));
       }
 
       const [lockResponse, ...results] = await Promise.all([lock(period), ...writes]);
