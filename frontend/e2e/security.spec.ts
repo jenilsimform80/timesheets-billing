@@ -6,9 +6,8 @@ import {
   newSession,
   apiOrigin,
   appGoto,
-  apiLoginTokens,
+  apiLogin,
   nav,
-  password,
   uiSignOut,
   uniqueCode,
 } from './support/helpers';
@@ -59,7 +58,7 @@ test.describe('security', () => {
     await anonymous.dispose();
   });
 
-  test('tokens are per tab: not in cookies or localStorage, a reload stays signed in, a new tab does not share them', async ({
+  test('tokens are HttpOnly cookies: invisible to JavaScript and web storage, a reload stays signed in, a new tab shares the session', async ({
     browser,
   }) => {
     const { context, page } = await newSession(browser, 'dev1');
@@ -67,51 +66,68 @@ test.describe('security', () => {
     const visible = await page.evaluate(() => ({
       cookie: document.cookie,
       local: JSON.stringify({ ...localStorage }),
+      session: JSON.stringify({ ...sessionStorage }),
     }));
-    expect(visible.cookie).toBe('');
+    expect(visible.cookie).toBe(''); // HttpOnly: document.cookie cannot see them
     expect(visible.local).not.toMatch(/eyJ|token/i);
-    expect(await context.cookies()).toEqual([]);
+    expect(visible.session).not.toMatch(/eyJ|token/i);
 
-    await page.reload(); // sessionStorage survives a reload
+    const cookies = await context.cookies();
+    const access = cookies.find((c) => /^(__Host-)?at$/.test(c.name));
+    const refresh = cookies.find((c) => /^(__Secure-)?rt$/.test(c.name));
+    expect(access, 'access cookie').toMatchObject({ httpOnly: true, sameSite: 'Lax', path: '/' });
+    expect(refresh, 'refresh cookie').toMatchObject({
+      httpOnly: true,
+      sameSite: 'Lax',
+      path: '/api/auth',
+    });
+    expect(cookies.every((c) => c.httpOnly)).toBe(true);
+
+    await page.reload(); // the cookies survive a reload: still signed in
     await expect(page.getByRole('button', { name: 'Account menu' })).toBeVisible();
 
-    const otherTab = await context.newPage(); // a new tab has its own storage: signed out
+    const otherTab = await context.newPage(); // cookies are shared by the whole browser profile
     await otherTab.goto('/');
-    await expect(otherTab.getByRole('heading', { name: 'Sign in' })).toBeVisible();
+    await expect(otherTab.getByRole('button', { name: 'Account menu' })).toBeVisible();
     await context.close();
   });
 
-  test('signing out ends the session on the server: copied tokens are dead', async ({
+  test('signing out ends the session on the server: copied cookies are dead', async ({
     browser,
     playwright,
   }) => {
-    // Sign in through the API so the test holds both tokens, exactly like an attacker who copied them.
-    const anonymous = await playwright.request.newContext({ baseURL: apiOrigin() });
-    const stolen = await apiLoginTokens(anonymous, USERS.dev1);
-    const asStolen = await playwright.request.newContext({
-      baseURL: apiOrigin(),
-      extraHTTPHeaders: { Authorization: `Bearer ${stolen.accessToken}` },
-    });
-    expect((await asStolen.get('/api/auth/me')).status()).toBe(200);
+    // Sign in through the API, then copy the cookie values, exactly like an attacker who stole them.
+    const victim = await playwright.request.newContext({ baseURL: apiOrigin() });
+    await apiLogin(victim, USERS.dev1);
+    const jar = (await victim.storageState()).cookies;
+    const value = (pattern: RegExp) => jar.find((c) => pattern.test(c.name))!;
+    const stolenAccess = value(/^(__Host-)?at$/);
+    const stolenRefresh = value(/^(__Secure-)?rt$/);
+    const asStolen = (cookie: { name: string; value: string }) =>
+      playwright.request.newContext({
+        baseURL: apiOrigin(),
+        extraHTTPHeaders: { Cookie: `${cookie.name}=${cookie.value}` },
+      });
+    const withAccess = await asStolen(stolenAccess);
+    const withRefresh = await asStolen(stolenRefresh);
+    expect((await withAccess.get('/api/auth/me')).status()).toBe(200);
 
-    const out = await anonymous.post('/api/auth/logout', {
-      data: { refreshToken: stolen.refreshToken },
-    });
+    const out = await victim.post('/api/auth/logout');
 
     expect(out.status()).toBe(204);
-    expect((await asStolen.get('/api/auth/me')).status()).toBe(401); // JWT unexpired, session gone
-    expect(
-      (
-        await anonymous.post('/api/auth/refresh', { data: { refreshToken: stolen.refreshToken } })
-      ).status(),
-    ).toBe(401);
-    await asStolen.dispose();
-    await anonymous.dispose();
+    expect((await withAccess.get('/api/auth/me')).status()).toBe(401); // JWT unexpired, session gone
+    expect((await withRefresh.post('/api/auth/refresh')).status()).toBe(401);
+    await withAccess.dispose();
+    await withRefresh.dispose();
+    await victim.dispose();
 
-    // And through the UI: Sign out also removes the tokens from storage.
+    // And through the UI: Sign out clears the cookies, so even a reload stays signed out.
     const { context, page } = await newSession(browser, 'dev1');
     await uiSignOut(page);
+    expect((await context.cookies()).filter((c) => c.value !== '')).toEqual([]);
     await appGoto(page, '/timesheet');
+    await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
+    await page.reload();
     await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
     await context.close();
   });
@@ -197,17 +213,16 @@ test.describe('security', () => {
     await manager.context.close();
   });
 
-  test('credentials are never ambient: a request carrying no Authorization header is refused', async ({
-    playwright,
+  test('CSRF: the browser sends cookies by itself, so a foreign Origin is refused even with valid cookies', async ({
+    browser,
   }) => {
-    // A cross-site page can make the browser send cookies, but it cannot make it send a bearer
-    // header; with no cookie auth at all there is nothing for a forged request to ride on.
-    const anonymous = await playwright.request.newContext({ baseURL: apiOrigin() });
-    await anonymous.post('/api/auth/login', {
-      data: { email: USERS.dev1, password: password() },
+    const { context, api } = await newSession(browser, 'dev1');
+
+    // What a malicious page's form post looks like to the server: valid cookies, foreign Origin.
+    const forged = await api.post('/api/auth/logout', {
       headers: { Origin: 'https://evil.example' },
     });
-    const forged = await anonymous.post('/api/time-entries', {
+    const forgedWrite = await api.post('/api/time-entries', {
       data: {
         projectId: data.projectId,
         taskId: data.taskId,
@@ -218,9 +233,11 @@ test.describe('security', () => {
       headers: { Origin: 'https://evil.example' },
     });
 
-    expect(forged.status()).toBe(401);
-    expect((await anonymous.storageState()).cookies).toEqual([]);
-    await anonymous.dispose();
+    expect(forged.status()).toBe(403);
+    expect(forgedWrite.status()).toBe(403);
+    expect(((await forged.json()) as { error: { code: string } }).error.code).toBe('FORBIDDEN');
+    expect((await api.get('/api/auth/me')).status()).toBe(200); // the session was NOT ended
+    await context.close();
   });
 
   test('screens hide what a role cannot use, and guarded pages say so', async ({ browser }) => {
@@ -300,7 +317,7 @@ test.describe('security', () => {
     const res = await api.get('/api/projects');
 
     expect(res.headers()['cache-control']).toBe('no-store');
-    expect(res.headers()['vary']).toMatch(/Authorization/i);
+    expect(res.headers()['vary']).toMatch(/Cookie/i);
     expect(res.headers()['etag']).toBeUndefined();
     expect(res.headers()['x-powered-by']).toBeUndefined();
     expect(res.headers()['x-content-type-options']).toBe('nosniff');

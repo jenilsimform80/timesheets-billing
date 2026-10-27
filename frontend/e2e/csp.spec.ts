@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { USERS, appGoto, newSession, uiSignIn } from './support/helpers';
+import { appGoto, newSession } from './support/helpers';
 
 /**
  * Every screen must work under the strict Content-Security-Policy the production web server sends
@@ -30,8 +30,8 @@ test('every screen renders without a single CSP violation', async ({ browser }) 
     );
   };
 
-  // A full page load: the only way to read the response headers. Tokens are memory-only, so this
-  // signs the session out; sign in again through the UI and move around without reloading.
+  // A full page load: the only way to read the response headers. Then move around without
+  // reloading (faster).
   const landing = await page.goto('/');
   if (process.env['E2E_EXPECT_CSP'] === '1') {
     const csp = landing?.headers()['content-security-policy'] ?? '';
@@ -42,7 +42,8 @@ test('every screen renders without a single CSP violation', async ({ browser }) 
     expect(landing?.headers()['x-content-type-options']).toBe('nosniff');
     expect(landing?.headers()['referrer-policy']).toBe('no-referrer');
   }
-  await uiSignIn(page, USERS.admin);
+  // The cookies survived the full page load, so the session is still signed in.
+  await expect(page.getByRole('button', { name: 'Account menu' })).toBeVisible();
 
   for (const [path, heading] of [
     ['/', /Welcome/],

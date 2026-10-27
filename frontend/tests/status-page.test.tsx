@@ -17,7 +17,7 @@ describe('StatusPage (API connectivity)', () => {
     expect(await section('Database').findByText('Connected')).toBeInTheDocument();
   });
 
-  it('calls the API (same origin, no cookies) through the configured base path', async () => {
+  it('calls the API (same origin, credentials included for the cookies) through the configured base path', async () => {
     const { fetchMock } = mockApi({ 'GET /health': healthOk(), 'GET /health/db': dbUp() });
 
     renderRoutes('/status');
@@ -28,7 +28,7 @@ describe('StatusPage (API connectivity)', () => {
       .filter((u) => u.includes('/health'))
       .sort();
     expect(urls).toEqual(['/api/health', '/api/health/db']);
-    for (const [, init] of fetchMock.mock.calls) expect(init?.credentials).toBeUndefined();
+    for (const [, init] of fetchMock.mock.calls) expect(init?.credentials).toBe('include');
   });
 
   it('shows "database unavailable" as a state of the system, not as a failed request', async () => {

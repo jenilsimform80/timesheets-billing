@@ -67,7 +67,7 @@ describe('account: change password', () => {
       ...signedInAs(users.contributor),
       'POST /auth/change-password': fail(401, 'UNAUTHENTICATED', 'Current password is incorrect'),
       // a 401 here first tries a silent token refresh; it works, so the 401 really was the password
-      'POST /auth/refresh': tokenResponse(users.contributor, '2'),
+      'POST /auth/refresh': tokenResponse(users.contributor),
     });
     renderRoutes('/account');
     await screen.findByRole('heading', { name: 'Account' });

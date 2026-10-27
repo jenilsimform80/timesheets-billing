@@ -42,7 +42,7 @@ cd frontend && npm run dev
 
 Open **http://localhost:5173** (use `localhost`, **not** `127.0.0.1`: the backend only allows the origin `http://localhost:5173`, so anything else gets `403 Origin not allowed` on POST/PATCH/DELETE). Go to **System status**: API and database should show "Operational" / "Connected".
 
-The browser calls the backend directly at `VITE_API_URL` (see `.env.example`). Authentication is a bearer token kept in per-tab sessionStorage (ADR 0015, 0018), so there are no cookies and no same-site requirement; **reloading keeps you signed in, and each tab has its own login** (admin, manager and contributor can each use a tab).
+The browser calls the backend directly at `VITE_API_URL` (see `.env.example`). Authentication is two HttpOnly cookies set by the backend (ADR 0019): the app never sees or stores a token, and it asks `/auth/me` who is signed in, so **reloading keeps you signed in**. Because the frontend (`:5173`) and the API (`:3000`) must be **same-site**, open the app on `localhost` (the cookies are not sent between `localhost` and `127.0.0.1`). Cookies are shared by every tab of a browser profile: **one user per profile**, so use separate profiles or a private window to try several roles at once.
 
 ## Environment variables
 

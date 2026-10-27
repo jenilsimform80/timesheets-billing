@@ -33,24 +33,18 @@ export const apiOrigin = (): string =>
     ? (process.env['E2E_BASE_URL'] ?? 'http://127.0.0.1:8080')
     : `http://127.0.0.1:${process.env['E2E_BACKEND_PORT'] ?? '3000'}`);
 
-export interface ApiTokens {
-  accessToken: string;
-  refreshToken: string;
-}
-
-/** Signs in through the API and returns the bearer tokens (the API has no cookies any more). */
-export async function apiLoginTokens(
-  request: APIRequestContext,
-  email: string,
-): Promise<ApiTokens> {
+/**
+ * Signs in through the API. The server answers with HttpOnly Set-Cookie headers, which the request
+ * context keeps in its own cookie jar and sends on every later call (like a browser would).
+ */
+export async function apiLogin(request: APIRequestContext, email: string): Promise<void> {
   const res = await request.post('/api/auth/login', { data: { email, password: password() } });
   expect(res.status(), `login as ${email}`).toBe(200);
-  return (await res.json()) as ApiTokens;
 }
 
 export interface Session {
   context: BrowserContext;
-  /** The page, signed in through the real login form. Tokens live in its memory only. */
+  /** The page, signed in through the real login form (HttpOnly cookies in its browser context). */
   page: Page;
   /** An API client signed in as the same user (its own session) for fast set-up and API assertions. */
   api: APIRequestContext;
@@ -58,8 +52,7 @@ export interface Session {
 
 /**
  * A fresh browser context signed in as `user`, optionally in another time zone. The page is signed
- * in through the UI (tokens are memory-only, so a full page load would sign it out: use `appGoto`
- * to move around, not `page.goto`).
+ * in through the UI; the API client signs in separately and holds its own session cookies.
  */
 export async function newSession(
   browser: Browser,
@@ -69,14 +62,8 @@ export async function newSession(
   const context = await browser.newContext({
     ...(options.timezoneId && { timezoneId: options.timezoneId }),
   });
-  const baseURL = apiOrigin();
-  const anonymous = await request.newContext({ baseURL });
-  const { accessToken } = await apiLoginTokens(anonymous, USERS[user]);
-  await anonymous.dispose();
-  const api = await request.newContext({
-    baseURL,
-    extraHTTPHeaders: { Authorization: `Bearer ${accessToken}` },
-  });
+  const api = await request.newContext({ baseURL: apiOrigin() });
+  await apiLogin(api, USERS[user]);
   const page = await context.newPage();
   await uiSignIn(page, USERS[user]);
   return { context, page, api };
@@ -84,8 +71,8 @@ export async function newSession(
 
 /**
  * Navigates inside the running single-page app WITHOUT a page load (history push + popstate, which
- * React Router listens to). A real `page.goto` reloads the document and, since the bearer tokens
- * are kept in memory only, would sign the user out.
+ * React Router listens to). Much faster than `page.goto`, which reloads the document and makes the
+ * app ask the server who is signed in again.
  */
 export async function appGoto(page: Page, path: string): Promise<void> {
   await page.evaluate((to) => {

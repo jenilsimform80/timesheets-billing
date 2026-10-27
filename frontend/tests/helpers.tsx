@@ -2,7 +2,6 @@ import { render } from '@testing-library/react';
 import { vi } from 'vitest';
 import { createMemoryRouter, RouterProvider, type RouteObject } from 'react-router';
 import type { Project, TimeEntry, User, WeekSummary } from '../src/api/types';
-import { setTokens } from '../src/api/token-store';
 import { routes } from '../src/routes';
 import { mondayOf, todayIso } from '../src/lib/dates';
 
@@ -56,12 +55,20 @@ function compile(key: string) {
 
 /**
  * Stubs global fetch. Handlers are keyed "METHOD /path" (path without /api, `:param` allowed).
- * Without a `GET /auth/me` handler the visitor is signed out (401).
+ * Without a `GET /auth/me` handler the visitor is signed out (401); a 401 first tries a silent
+ * `POST /auth/refresh`, which by default is refused too (no refresh cookie).
  */
 export function mockApi(handlers: Record<string, Responder> = {}) {
   const table = { ...handlers };
   if (!('GET /auth/me' in table)) {
     table['GET /auth/me'] = fail(401, 'UNAUTHENTICATED', 'Authentication required');
+    if (!('POST /auth/refresh' in table)) {
+      table['POST /auth/refresh'] = fail(
+        401,
+        'UNAUTHENTICATED',
+        'Invalid or expired refresh token',
+      );
+    }
   }
   const compiled = Object.keys(table).map(compile);
   const requests: MockRequest[] = [];
@@ -138,25 +145,16 @@ export const users = {
   },
 } satisfies Record<string, User>;
 
-/** The body of a successful login/refresh. */
-export const tokenResponse = (user: User, suffix = '1') =>
-  ok({
-    user,
-    tokenType: 'Bearer',
-    accessToken: `access-${suffix}`,
-    expiresIn: 900,
-    refreshToken: `refresh-${suffix}`,
-    refreshTokenExpiresAt: '2026-03-02T18:00:00.000Z',
-  });
+/** The body of a successful login/refresh: only the user (the tokens are HttpOnly cookies). */
+export const tokenResponse = (user: User) => ok({ user });
 
 /**
- * Handlers for a signed-in visitor. Tokens only live in memory in the real app (so a fresh page
- * load is signed out); here we seed that memory, which is what a visit after sign-in looks like.
+ * Handlers for a signed-in visitor. The real app cannot see its HttpOnly cookies; it learns who it
+ * is by asking `/auth/me`, which is exactly what this answers.
  */
-export const signedInAs = (user: User): Record<string, Responder> => {
-  setTokens({ accessToken: 'test-access-token', refreshToken: 'test-refresh-token' });
-  return { 'GET /auth/me': ok({ user }) };
-};
+export const signedInAs = (user: User): Record<string, Responder> => ({
+  'GET /auth/me': ok({ user }),
+});
 
 export const project = (overrides: Partial<Project> = {}): Project => ({
   id: 'p1',

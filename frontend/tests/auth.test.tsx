@@ -39,6 +39,29 @@ describe('session bootstrap and route guards', () => {
     ).toBeInTheDocument();
   });
 
+  it('after a reload with an expired access cookie, renews the session silently instead of asking to sign in', async () => {
+    let refreshed = false;
+    const api = mockApi({
+      ...dashboardApi(),
+      'GET /auth/me': () =>
+        refreshed
+          ? ok({ user: users.contributor })
+          : fail(401, 'UNAUTHENTICATED', 'Authentication required'),
+      'POST /auth/refresh': () => {
+        refreshed = true;
+        return tokenResponse(users.contributor);
+      },
+    });
+
+    renderRoutes('/');
+
+    expect(
+      await screen.findByRole('heading', { name: /Welcome, Casey Contributor/ }),
+    ).toBeInTheDocument();
+    expect(api.calls('POST /auth/refresh')).toHaveLength(1);
+    expect(api.calls('POST /auth/refresh')[0]!.body).toBeUndefined(); // the cookie carries the token
+  });
+
   it('redirects an anonymous visitor to /login and remembers where they wanted to go', async () => {
     mockApi(); // /auth/me -> 401
 
@@ -261,7 +284,7 @@ describe('sign out and expired sessions', () => {
     // Admin is on /users, signs out; a contributor (who cannot open /users) then signs in.
     let current: typeof users.admin | typeof users.contributor | null = users.admin;
     mockApi({
-      ...signedInAs(users.admin), // seeds the in-memory tokens; /auth/me is overridden below
+      ...signedInAs(users.admin), // /auth/me is overridden below
       'GET /auth/me': () =>
         current ? ok({ user: current }) : fail(401, 'UNAUTHENTICATED', 'Authentication required'),
       'GET /users': ok({ users: [users.admin] }),
@@ -271,7 +294,7 @@ describe('sign out and expired sessions', () => {
       },
       'POST /auth/login': () => {
         current = users.contributor;
-        return tokenResponse(current, '2');
+        return tokenResponse(current);
       },
     });
     const { router } = renderRoutes('/users');

@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { apiRequest, buildUrl, setUnauthorizedHandler } from '../src/api/client';
 import { ApiError } from '../src/api/errors';
-import { clearTokens, getAccessToken, setTokens } from '../src/api/token-store';
 import { jsonResponse } from './helpers';
 
 const stub = (impl: (url: string, init?: RequestInit) => Promise<Response>) => {
@@ -30,7 +29,7 @@ describe('buildUrl', () => {
 });
 
 describe('apiRequest', () => {
-  it('asks for JSON, with no body header and no Authorization when signed out', async () => {
+  it('asks for JSON, with no body header, and lets the browser attach its cookies', async () => {
     const fetchMock = stub(() => Promise.resolve(jsonResponse({ ok: true })));
 
     const result = await apiRequest<{ ok: boolean }>('/ping');
@@ -38,6 +37,7 @@ describe('apiRequest', () => {
     expect(result).toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledWith('/api/ping', {
       method: 'GET',
+      credentials: 'include',
       headers: { Accept: 'application/json' },
     });
   });
@@ -51,7 +51,8 @@ describe('apiRequest', () => {
     expect(init.method).toBe('POST');
     expect(init.body).toBe('{"name":"x","n":1}');
     expect(init.headers).toMatchObject({ 'Content-Type': 'application/json' });
-    expect(init.credentials).toBeUndefined(); // no cookies: auth is the Authorization header
+    expect(init.credentials).toBe('include'); // HttpOnly cookies ride along, also to the dev API origin
+    expect(JSON.stringify(init.headers)).not.toMatch(/Authorization|Bearer/i);
   });
 
   it('returns undefined for 204 No Content', async () => {
@@ -186,52 +187,52 @@ describe('central 401 handling', () => {
   });
 });
 
-describe('bearer tokens', () => {
+describe('session cookies', () => {
   const unauthorized = () =>
     jsonResponse({ error: { code: 'UNAUTHENTICATED', message: 'Authentication required' } }, 401);
-  const pair = (n: string) =>
-    jsonResponse({ accessToken: `access-${n}`, refreshToken: `refresh-${n}`, user: {} });
-  const authOf = (init?: RequestInit) => (init?.headers as Record<string, string>)['Authorization'];
   const urlsOf = (m: ReturnType<typeof stub>) => m.mock.calls.map(([url]) => url);
 
-  it('sends the access token as a Bearer header', async () => {
-    setTokens({ accessToken: 'abc', refreshToken: 'r' });
+  it('never sets an Authorization header: there is no token in JavaScript to send', async () => {
     const fetchMock = stub(() => Promise.resolve(jsonResponse({})));
 
     await apiRequest('/projects');
 
-    expect(authOf(fetchMock.mock.calls[0]?.[1])).toBe('Bearer abc');
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init.credentials).toBe('include');
+    expect(init.headers).not.toHaveProperty('Authorization');
   });
 
-  it('on 401 refreshes once, stores the new pair and replays the request with the new token', async () => {
-    setTokens({ accessToken: 'old', refreshToken: 'r1' });
+  it('on 401 refreshes once (no body: the refresh cookie travels itself) and replays the request', async () => {
     const handler = vi.fn();
     setUnauthorizedHandler(handler);
-    const fetchMock = stub((url, init) => {
-      if (url.endsWith('/auth/refresh')) return Promise.resolve(pair('2'));
-      return Promise.resolve(
-        authOf(init) === 'Bearer access-2' ? jsonResponse({ ok: 1 }) : unauthorized(),
-      );
+    let refreshed = false;
+    const fetchMock = stub((url) => {
+      if (url.endsWith('/auth/refresh')) {
+        refreshed = true;
+        return Promise.resolve(jsonResponse({ user: {} }));
+      }
+      return Promise.resolve(refreshed ? jsonResponse({ ok: 1 }) : unauthorized());
     });
 
     await expect(apiRequest('/projects')).resolves.toEqual({ ok: 1 });
 
     expect(urlsOf(fetchMock)).toEqual(['/api/projects', '/api/auth/refresh', '/api/projects']);
     const refreshCall = fetchMock.mock.calls[1]?.[1] as RequestInit;
-    expect(JSON.parse(refreshCall.body as string)).toEqual({ refreshToken: 'r1' });
-    expect(authOf(refreshCall)).toBeUndefined(); // the refresh call carries no (stale) access token
-    expect(getAccessToken()).toBe('access-2');
+    expect(refreshCall.method).toBe('POST');
+    expect(refreshCall.body).toBeUndefined();
+    expect(refreshCall.credentials).toBe('include');
     expect(handler).not.toHaveBeenCalled();
     setUnauthorizedHandler(null);
   });
 
   it('shares ONE refresh between parallel 401s (refresh tokens are single-use)', async () => {
-    setTokens({ accessToken: 'old', refreshToken: 'r1' });
-    const fetchMock = stub((url, init) => {
-      if (url.endsWith('/auth/refresh')) return Promise.resolve(pair('2'));
-      return Promise.resolve(
-        authOf(init) === 'Bearer access-2' ? jsonResponse({}) : unauthorized(),
-      );
+    let refreshed = false;
+    const fetchMock = stub((url) => {
+      if (url.endsWith('/auth/refresh')) {
+        refreshed = true;
+        return Promise.resolve(jsonResponse({ user: {} }));
+      }
+      return Promise.resolve(refreshed ? jsonResponse({}) : unauthorized());
     });
 
     await Promise.all([apiRequest('/a'), apiRequest('/b'), apiRequest('/c')]);
@@ -239,8 +240,7 @@ describe('bearer tokens', () => {
     expect(urlsOf(fetchMock).filter((u) => u === '/api/auth/refresh')).toHaveLength(1);
   });
 
-  it('when the refresh is rejected: forgets the tokens, signs the user out and rejects with the 401', async () => {
-    setTokens({ accessToken: 'old', refreshToken: 'r1' });
+  it('when the refresh is rejected: signs the user out and rejects with the 401', async () => {
     const handler = vi.fn();
     setUnauthorizedHandler(handler);
     stub(() => Promise.resolve(unauthorized()));
@@ -248,17 +248,15 @@ describe('bearer tokens', () => {
     const error = await caught(apiRequest('/projects'));
 
     expect(error).toMatchObject({ status: 401 });
-    expect(getAccessToken()).toBeNull();
     expect(handler).toHaveBeenCalledOnce();
     setUnauthorizedHandler(null);
   });
 
   it('does not loop: a 401 after a successful refresh signs out instead of refreshing again', async () => {
-    setTokens({ accessToken: 'old', refreshToken: 'r1' });
     const handler = vi.fn();
     setUnauthorizedHandler(handler);
     const fetchMock = stub((url) =>
-      Promise.resolve(url.endsWith('/auth/refresh') ? pair('2') : unauthorized()),
+      Promise.resolve(url.endsWith('/auth/refresh') ? jsonResponse({ user: {} }) : unauthorized()),
     );
 
     await caught(apiRequest('/projects'));
@@ -266,11 +264,9 @@ describe('bearer tokens', () => {
     expect(urlsOf(fetchMock).filter((u) => u === '/api/auth/refresh')).toHaveLength(1);
     expect(handler).toHaveBeenCalledOnce();
     setUnauthorizedHandler(null);
-    clearTokens();
   });
 
   it('does not refresh for calls where a 401 is the answer (e.g. login)', async () => {
-    setTokens({ accessToken: 'old', refreshToken: 'r1' });
     const fetchMock = stub(() => Promise.resolve(unauthorized()));
 
     await caught(
@@ -278,5 +274,16 @@ describe('bearer tokens', () => {
     );
 
     expect(urlsOf(fetchMock)).toEqual(['/api/auth/login']);
+  });
+
+  it('keeps no token anywhere in browser storage', async () => {
+    stub(() =>
+      Promise.resolve(jsonResponse({ user: {}, accessToken: 'leak', refreshToken: 'leak' })),
+    );
+
+    await apiRequest('/auth/login', { method: 'POST', body: {} });
+
+    expect(window.sessionStorage.length).toBe(0);
+    expect(window.localStorage.length).toBe(0);
   });
 });

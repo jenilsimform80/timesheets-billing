@@ -1,6 +1,5 @@
 import { config } from '../config/env';
 import { ApiError, isApiErrorBody } from './errors';
-import { clearTokens, getAccessToken, getRefreshToken, setTokens } from './token-store';
 
 type UnauthorizedHandler = () => void;
 let unauthorizedHandler: UnauthorizedHandler | null = null;
@@ -24,9 +23,9 @@ export interface RequestOptions {
   /** Set false for calls where 401 is an expected answer (login, wrong password). Default true. */
   handleUnauthorized?: boolean;
   /**
-   * Whether a 401 first triggers one silent token refresh and a replay. Defaults to
+   * Whether a 401 first triggers one silent session refresh and a replay. Defaults to
    * `handleUnauthorized`; set true on a call whose 401 can ALSO mean "wrong password" (change
-   * password) so an expired access token is still renewed instead of shown as a form error.
+   * password) so an expired access cookie is still renewed instead of shown as a form error.
    */
   silentRefresh?: boolean;
 }
@@ -68,19 +67,24 @@ function toApiError(response: Response, payload: unknown): ApiError {
   );
 }
 
-/** One network round trip: attaches the bearer token (if any), returns status + parsed JSON. */
+/**
+ * One network round trip. Authentication is two HttpOnly cookies the browser attaches itself; this
+ * code never sees, stores or sends a token. `credentials: 'include'` is needed because in dev the
+ * API is another origin (http://localhost:3000, same-site as the app on :5173); the backend only
+ * answers credentialed CORS requests from its allow-listed FRONTEND_URL. In production the app and
+ * `/api` share one origin (nginx), where 'include' behaves like 'same-origin'.
+ */
 async function send(
   path: string,
   { method = 'GET', query, body, signal }: RequestOptions,
-  accessToken: string | null,
 ): Promise<{ response: Response; payload: unknown }> {
   let response: Response;
   try {
     response = await fetch(buildUrl(path, query), {
       method,
+      credentials: 'include',
       headers: {
         Accept: 'application/json',
-        ...(accessToken && { Authorization: `Bearer ${accessToken}` }),
         ...(body !== undefined && { 'Content-Type': 'application/json' }),
       },
       ...(body !== undefined && { body: JSON.stringify(body) }),
@@ -93,43 +97,18 @@ async function send(
   return { response, payload: await readJson(response) };
 }
 
-interface TokenResponse {
-  accessToken: string;
-  refreshToken: string;
-}
-const isTokenResponse = (value: unknown): value is TokenResponse =>
-  typeof value === 'object' &&
-  value !== null &&
-  typeof (value as TokenResponse).accessToken === 'string' &&
-  typeof (value as TokenResponse).refreshToken === 'string';
-
-/** Remembers the tokens from a login/refresh response. */
-export function storeTokensFrom(payload: unknown): void {
-  if (!isTokenResponse(payload)) {
-    throw new ApiError(500, 'UNEXPECTED_RESPONSE', 'The server sent an unexpected response.');
-  }
-  setTokens({ accessToken: payload.accessToken, refreshToken: payload.refreshToken });
-}
-
 /**
- * Exchanges the refresh token for a new pair. "Single flight": if five requests hit 401 together
- * they share ONE refresh call. That matters because refresh tokens are single-use (rotation): a
- * second parallel call would present the already-replaced token and sign the user out.
+ * Asks the server to rotate the refresh cookie and set a new access cookie. "Single flight": if
+ * five requests hit 401 together they share ONE refresh call. That matters because refresh tokens
+ * are single-use (rotation): a second parallel call would present the already-replaced token and
+ * sign the user out.
  */
 let refreshInFlight: Promise<boolean> | null = null;
-function refreshTokens(): Promise<boolean> {
+function refreshSession(): Promise<boolean> {
   refreshInFlight ??= (async () => {
-    const refreshToken = getRefreshToken();
-    if (!refreshToken) return false;
     try {
-      const { response, payload } = await send(
-        '/auth/refresh',
-        { method: 'POST', body: { refreshToken } },
-        null,
-      );
-      if (!response.ok) return false; // rejected (expired, used, deactivated) or server trouble
-      storeTokensFrom(payload);
-      return true;
+      const { response } = await send('/auth/refresh', { method: 'POST' });
+      return response.ok; // false: rejected (expired, used, deactivated, no cookie) or server trouble
     } catch {
       return false;
     }
@@ -140,23 +119,22 @@ function refreshTokens(): Promise<boolean> {
 }
 
 /**
- * The only place that calls `fetch`. Sends the bearer access token, speaks JSON, and turns every
- * failure into an `ApiError`. On a 401 it first tries ONE silent token refresh and replays the
+ * The only place that calls `fetch`. Sends the session cookies, speaks JSON, and turns every
+ * failure into an `ApiError`. On a 401 it first tries ONE silent session refresh and replays the
  * request; only if that fails is the user treated as signed out. Cancellation (AbortError) is
  * passed through unchanged so callers can ignore it.
  */
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { handleUnauthorized = true, silentRefresh = handleUnauthorized } = options;
 
-  let { response, payload } = await send(path, options, getAccessToken());
+  let { response, payload } = await send(path, options);
 
   // Login/logout (silentRefresh false) never refresh: a 401 there is the answer, not a stale token.
-  if (response.status === 401 && silentRefresh && getRefreshToken()) {
-    if (await refreshTokens()) {
-      ({ response, payload } = await send(path, options, getAccessToken()));
+  if (response.status === 401 && silentRefresh) {
+    if (await refreshSession()) {
+      ({ response, payload } = await send(path, options));
     } else {
       // The session is really gone (refresh rejected): sign out even for calls that opted out.
-      clearTokens();
       unauthorizedHandler?.();
       throw toApiError(response, payload);
     }
@@ -164,7 +142,6 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
 
   if (!response.ok) {
     if (response.status === 401 && handleUnauthorized) {
-      clearTokens();
       unauthorizedHandler?.();
     }
     throw toApiError(response, payload);
