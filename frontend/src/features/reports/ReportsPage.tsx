@@ -11,6 +11,9 @@ import { CheckboxField, SelectField, TextField } from '../../components/ui/FormC
 import { useAuth } from '../../auth/useAuth';
 import { useAsync } from '../../hooks/useAsync';
 import { daysInclusive, formatMonth, isValidIsoDate, todayIso } from '../../lib/dates';
+import { useMutation } from '../../hooks/useMutation';
+import { downloadHoursReportPdf } from '../../lib/report-pdf';
+import styles from './Reports.module.css';
 
 const MAX_RANGE_DAYS = 1830; // keep in step with the backend limit (docs/api-contracts.md)
 
@@ -86,6 +89,30 @@ export function ReportsPage() {
   const projectOptions = projects.state.status === 'success' ? projects.state.data : [];
   const peopleOptions = people.state.status === 'success' ? people.state.data : [];
 
+  // The PDF is exactly the report on screen; there is nothing to export when it is empty or failed.
+  const shown =
+    report.state.status === 'success' && report.state.data.rows.length > 0
+      ? report.state.data
+      : null;
+  const exportPdf = useCallback(async () => {
+    if (!shown) return;
+    const projectList = projects.state.status === 'success' ? projects.state.data : [];
+    const peopleList = people.state.status === 'success' ? people.state.data : [];
+    await downloadHoursReportPdf(shown, {
+      generatedBy: user?.name ?? '',
+      generatedOn: todayIso(),
+      filters: [
+        ...(applied.projectId
+          ? [`Project: ${labelOfProject(projectList, applied.projectId)}`]
+          : []),
+        ...(applied.userId
+          ? [`Person: ${peopleList.find((p) => p.id === applied.userId)?.name ?? ''}`]
+          : []),
+      ],
+    });
+  }, [shown, user?.name, applied, projects.state, people.state]);
+  const download = useMutation(exportPdf);
+
   return (
     <>
       <h1>Hours report</h1>
@@ -144,12 +171,24 @@ export function ReportsPage() {
             ))}
           </div>
         </fieldset>
-        <div>
+        <div className={styles.actions}>
           <Button type="submit">Run report</Button>
+          {shown && (
+            <Button
+              variant="secondary"
+              onClick={() => void download.run()}
+              disabled={download.running}
+            >
+              {download.running ? 'Creating PDF…' : 'Download PDF'}
+            </Button>
+          )}
         </div>
+        {download.error && (
+          <Alert variant="error">Could not create the PDF. Please try again.</Alert>
+        )}
       </form>
 
-      <section aria-label="Report results">
+      <section aria-label="Report results" className={styles.results}>
         <AsyncView
           state={report.state}
           onRetry={report.reload}
@@ -168,6 +207,11 @@ export function ReportsPage() {
       </section>
     </>
   );
+}
+
+function labelOfProject(projects: { id: string; code: string; name: string }[], id: string) {
+  const p = projects.find((candidate) => candidate.id === id);
+  return p ? `${p.code} · ${p.name}` : '';
 }
 
 function ReportTable({ report }: { report: HoursReport }) {

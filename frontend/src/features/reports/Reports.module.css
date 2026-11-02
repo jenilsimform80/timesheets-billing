@@ -1,0 +1,13 @@
+/* "Run report" on the left, "Download PDF" at the far right of the same row. */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+/* Breathing room between the button row and the results table. */
+.results {
+  margin-top: 1.5rem;
+}
