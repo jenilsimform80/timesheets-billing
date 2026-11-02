@@ -11,7 +11,7 @@ Honest list as of the end of Phase 9. Nothing here is hidden behind a passing te
 - Previously: no user administration, password reset, registration or MFA (demo users come from `npm run db:seed`, dev only).
 - No audit-trail screen (API exists, admin-only); admin changes to projects (budget/archive/dates) are **not audited**.
 - A top-level manager (no manager of their own) cannot submit a timesheet (nobody could approve it).
-- No notifications, report export, charts, saved filters, pagination (lists are capped: entries 1000, submissions 200, reports 5000 rows with a `truncated` flag).
+- The hours report can be downloaded as a PDF (ADR 0020: drawn in the browser, Western-European characters only); there is no export for the budget report and no CSV/Excel export. No notifications, charts, saved filters, pagination (lists are capped: entries 1000, submissions 200, reports 5000 rows with a `truncated` flag).
 - Locks are per global calendar month only (no per-project or arbitrary ranges); entries that exist when a lock is placed are not re-validated; locking a month with pending submissions is allowed; rejecting a week that touches a locked month is refused.
 
 ## 3. Delivery (Phase 10)
