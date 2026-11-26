@@ -6,6 +6,7 @@ import { PasswordField } from '../../components/ui/FormControls';
 import { describeError } from '../../components/ui/describeError';
 import { useAuth, useCurrentUser } from '../../auth/useAuth';
 import { useMutation } from '../../hooks/useMutation';
+import { useToast } from '../../components/ui/toast-context';
 import { fieldErrorsFrom, MIN_PASSWORD_LENGTH } from '../../lib/forms';
 import styles from '../projects/Projects.module.css';
 
@@ -16,13 +17,12 @@ export function AccountPage() {
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
   const [clientErrors, setClientErrors] = useState<Record<string, string>>({});
-  const [done, setDone] = useState(false);
+  const toast = useToast();
   const save = useMutation(changePassword);
   const errors = { ...fieldErrorsFrom(save.error), ...clientErrors };
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    setDone(false);
     const found: Record<string, string> = {};
     if (current === '') found['currentPassword'] = 'Enter your current password';
     if (next.length < MIN_PASSWORD_LENGTH)
@@ -36,7 +36,7 @@ export function AccountPage() {
       setCurrent('');
       setNext('');
       setConfirm('');
-      setDone(true);
+      toast.success('Your password was changed.');
       markPasswordChanged();
     }
   };
@@ -63,7 +63,6 @@ export function AccountPage() {
           Changing your password signs you out everywhere else. This device stays signed in.
         </p>
         <form onSubmit={(e) => void onSubmit(e)} noValidate className="stack">
-          {done && <Alert variant="success">Your password was changed.</Alert>}
           {save.error && Object.keys(fieldErrorsFrom(save.error)).length === 0 && (
             <Alert variant="error">{describeError(save.error)}</Alert>
           )}

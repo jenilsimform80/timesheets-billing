@@ -17,6 +17,7 @@ import { EmptyState } from '../../components/ui/EmptyState';
 import { describeError } from '../../components/ui/describeError';
 import { useMutation } from '../../hooks/useMutation';
 import { useAsync } from '../../hooks/useAsync';
+import { useToast } from '../../components/ui/toast-context';
 import styles from '../projects/Projects.module.css';
 import { EditUserForm } from './EditUserForm';
 import { ResetPasswordForm } from './ResetPasswordForm';
@@ -29,8 +30,10 @@ export function UsersPage() {
   const load = useCallback((signal: AbortSignal) => listUsers(signal), []);
   const { state, reload } = useAsync(load);
 
+  const toast = useToast();
   const create = async (value: NewUserInput) => {
     await createUser(value);
+    toast.success(`User ${value.name} was created.`);
     reload();
   };
 
@@ -115,8 +118,11 @@ function UserRows({
   onChanged: () => void;
 }) {
   const [panel, setPanel] = useState<'edit' | 'password' | null>(null);
+  const toast = useToast();
   const toggle = useMutation(async () => {
-    await updateUser(user.id, { isActive: user.isActive === false });
+    const activating = user.isActive === false;
+    await updateUser(user.id, { isActive: activating });
+    toast.success(`${user.name} was ${activating ? 'reactivated' : 'deactivated'}.`);
     onChanged();
   });
   const isAdmin = user.role === 'ADMIN';
@@ -124,10 +130,12 @@ function UserRows({
 
   const save = async (patch: UserPatch) => {
     await updateUser(user.id, patch);
+    toast.success(`${user.name} was updated.`);
     onChanged();
   };
   const setPassword = async (password: string) => {
     await resetUserPassword(user.id, password);
+    toast.success(`Password reset for ${user.name}.`);
   };
 
   return (

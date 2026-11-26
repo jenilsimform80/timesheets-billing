@@ -2,6 +2,7 @@ import type { RouteObject } from 'react-router';
 import { AuthProvider } from '../auth/AuthContext';
 import { RequireAuth } from '../auth/RequireAuth';
 import { AppLayout } from '../components/layout/AppLayout';
+import { ToastProvider } from '../components/ui/ToastProvider';
 import { RequireRole } from '../auth/RequireRole';
 import { ApprovalsPage } from '../features/approvals/ApprovalsPage';
 import { PeriodsPage } from '../features/periods/PeriodsPage';
@@ -23,9 +24,11 @@ export const routes: RouteObject[] = [
   {
     path: '/',
     element: (
-      <AuthProvider>
-        <AppLayout />
-      </AuthProvider>
+      <ToastProvider>
+        <AuthProvider>
+          <AppLayout />
+        </AuthProvider>
+      </ToastProvider>
     ),
     errorElement: <RouteErrorPage />,
     children: [

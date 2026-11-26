@@ -12,6 +12,7 @@ import { useAuth } from '../../auth/useAuth';
 import { useAsync } from '../../hooks/useAsync';
 import { daysInclusive, formatMonth, isValidIsoDate, todayIso } from '../../lib/dates';
 import { useMutation } from '../../hooks/useMutation';
+import { useToast } from '../../components/ui/toast-context';
 import { downloadHoursReportPdf } from '../../lib/report-pdf';
 import styles from './Reports.module.css';
 
@@ -111,7 +112,11 @@ export function ReportsPage() {
       ],
     });
   }, [shown, user?.name, applied, projects.state, people.state]);
-  const download = useMutation(exportPdf);
+  const toast = useToast();
+  const download = useMutation(async () => {
+    await exportPdf();
+    toast.success('PDF downloaded.');
+  });
 
   return (
     <>

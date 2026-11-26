@@ -4,6 +4,7 @@ import { canAccess, type Area } from '../../auth/access';
 import { useAuth } from '../../auth/useAuth';
 import { useMutation } from '../../hooks/useMutation';
 import { Alert } from '../ui/Alert';
+import { useToast } from '../ui/toast-context';
 import { describeError } from '../ui/describeError';
 import { ActionMenu, type ActionMenuItem } from '../ui/ActionMenu';
 import styles from './AppLayout.module.css';
@@ -56,7 +57,11 @@ function initials(name: string): string {
 
 export function AppLayout() {
   const { state, logout } = useAuth();
-  const signOut = useMutation(logout);
+  const toast = useToast();
+  const signOut = useMutation(async () => {
+    await logout();
+    toast.success('You have been signed out.');
+  });
   const navigate = useNavigate();
   const user = state.status === 'authenticated' ? state.user : null;
   const items = user

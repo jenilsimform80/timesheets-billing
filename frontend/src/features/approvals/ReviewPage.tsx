@@ -14,6 +14,7 @@ import { StatusBadge } from '../../components/ui/StatusBadge';
 import { describeError } from '../../components/ui/describeError';
 import { useAsync } from '../../hooks/useAsync';
 import { useMutation } from '../../hooks/useMutation';
+import { useToast } from '../../components/ui/toast-context';
 import { formatRange, formatTimestamp, weekDays } from '../../lib/dates';
 import { DaySection } from '../timesheet/DaySection';
 import { createProjectLookup } from '../timesheet/projectLookup';
@@ -61,8 +62,7 @@ export function ReviewPage() {
 
 function ReviewContent({ review, onDecided }: { review: Review; onDecided: () => void }) {
   const { submission, week, owner, projects } = review;
-  // Kept here (not in the form) so the confirmation survives the form being replaced after reload.
-  const [notice, setNotice] = useState<string | null>(null);
+  const toast = useToast();
   const lookup = createProjectLookup(projects);
   const byDay = new Map<string, typeof week.entries>();
   for (const e of week.entries) byDay.set(e.workDate, [...(byDay.get(e.workDate) ?? []), e]);
@@ -107,13 +107,11 @@ function ReviewContent({ review, onDecided }: { review: Review; onDecided: () =>
         ))}
       </div>
 
-      {notice && <Alert variant="success">{notice}</Alert>}
-
       {submission.status === 'SUBMITTED' ? (
         <DecisionForm
           submissionId={submission.id}
           onDecided={(decision) => {
-            setNotice(
+            toast.success(
               `Timesheet ${decision}. ${owner.name} will see the result on their timesheet.`,
             );
             onDecided();

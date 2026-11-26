@@ -6,6 +6,7 @@ import { PasswordField, TextField } from '../components/ui/FormControls';
 import { describeError } from '../components/ui/describeError';
 import { useAuth } from '../auth/useAuth';
 import { useMutation } from '../hooks/useMutation';
+import { useToast } from '../components/ui/toast-context';
 import { fieldErrorsFrom } from '../lib/forms';
 import { safeReturnPath } from '../lib/navigation';
 import styles from './LoginPage.module.css';
@@ -17,6 +18,7 @@ export function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [touched, setTouched] = useState(false);
+  const toast = useToast();
   const signIn = useMutation(login);
 
   if (state.status === 'authenticated') return <Navigate to={from} replace />;
@@ -28,7 +30,8 @@ export function LoginPage() {
     event.preventDefault();
     setTouched(true);
     if (missing.email || missing.password) return;
-    await signIn.run(email.trim(), password);
+    const result = await signIn.run(email.trim(), password);
+    if (result.ok) toast.success('Signed in.');
   };
 
   return (

@@ -9,6 +9,7 @@ import { TextAreaField, TextField } from '../../components/ui/FormControls';
 import { describeError } from '../../components/ui/describeError';
 import { useAsync } from '../../hooks/useAsync';
 import { useMutation } from '../../hooks/useMutation';
+import { useToast } from '../../components/ui/toast-context';
 import { formatMonth, formatTimestamp } from '../../lib/dates';
 import styles from '../projects/Projects.module.css';
 
@@ -73,8 +74,10 @@ function LockForm({ onLocked }: { onLocked: () => void }) {
   const [month, setMonth] = useState('');
   const [note, setNote] = useState('');
   const [error, setError] = useState<string | undefined>();
+  const toast = useToast();
   const lock = useMutation(async (period: string, text: string) => {
     await lockPeriod(period, text || undefined);
+    toast.success(`${formatMonth(period)} is now locked.`);
     setMonth('');
     setNote('');
     onLocked();
@@ -125,8 +128,10 @@ function PeriodRow({ period, onUnlocked }: { period: LockedPeriod; onUnlocked: (
   const [unlocking, setUnlocking] = useState(false);
   const [reason, setReason] = useState('');
   const [reasonError, setReasonError] = useState<string | undefined>();
+  const toast = useToast();
   const unlock = useMutation(async (text: string) => {
     await unlockPeriod(period.period, text);
+    toast.success(`${formatMonth(period.period)} was unlocked.`);
     onUnlocked();
   });
   const label = formatMonth(period.period);

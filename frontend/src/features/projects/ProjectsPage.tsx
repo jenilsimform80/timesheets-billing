@@ -20,6 +20,7 @@ import { describeError } from '../../components/ui/describeError';
 import { useAuth } from '../../auth/useAuth';
 import { useAsync } from '../../hooks/useAsync';
 import { useMutation } from '../../hooks/useMutation';
+import { useToast } from '../../components/ui/toast-context';
 import { formatRange } from '../../lib/dates';
 import { ProjectForm } from './ProjectForm';
 import styles from './Projects.module.css';
@@ -47,8 +48,10 @@ export function ProjectsPage() {
     (u) => u.role !== 'ADMIN' && u.isActive !== false,
   );
 
+  const toast = useToast();
   const create = async (value: ProjectInput | ProjectPatch) => {
     await createProject(value as ProjectInput);
+    toast.success('Project created.');
     reload();
   };
 
@@ -127,14 +130,17 @@ function ProjectCard({
   onChanged: () => void;
 }) {
   const [editing, setEditing] = useState(false);
+  const toast = useToast();
   const toggle = useMutation(async () => {
     await updateProject(project.id, { isActive: !project.isActive });
+    toast.success(`Project ${project.code} ${project.isActive ? 'archived' : 'restored'}.`);
     onChanged();
   });
   const headingId = `project-${project.id}`;
 
   const save = async (patch: ProjectInput | ProjectPatch) => {
     await updateProject(project.id, patch);
+    toast.success(`Project ${project.code} was updated.`);
     onChanged();
   };
 
@@ -223,6 +229,7 @@ function ProjectCard({
         {...(canAddTasks && {
           onAdd: async (name: string, assigneeIds: string[]) => {
             await createTask(project.id, name, assigneeIds);
+            toast.success('Task added.');
             onChanged();
           },
           onUpdate: async (
@@ -230,6 +237,7 @@ function ProjectCard({
             patch: { name?: string; isActive?: boolean; assigneeIds?: string[] },
           ) => {
             await updateTask(project.id, taskId, patch);
+            toast.success('Task updated.');
             onChanged();
           },
         })}

@@ -7,6 +7,7 @@ import { describeError } from '../../components/ui/describeError';
 import { useCurrentUser } from '../../auth/useAuth';
 import { useAsync } from '../../hooks/useAsync';
 import { useMutation } from '../../hooks/useMutation';
+import { useToast } from '../../components/ui/toast-context';
 import { formatTimestamp } from '../../lib/dates';
 import { useCallback } from 'react';
 import styles from './Timesheet.module.css';
@@ -21,8 +22,10 @@ interface SubmissionPanelProps {
 export function SubmissionPanel({ week, onSubmitted }: SubmissionPanelProps) {
   const user = useCurrentUser();
   const [confirming, setConfirming] = useState(false);
+  const toast = useToast();
   const submit = useMutation(async () => {
     await submitWeek(week.weekStart);
+    toast.success('Timesheet submitted for approval.');
     setConfirming(false);
     onSubmitted();
   });

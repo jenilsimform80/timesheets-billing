@@ -16,6 +16,7 @@ import { AsyncView } from '../../components/ui/AsyncView';
 import { StatusBadge } from '../../components/ui/StatusBadge';
 import { combineAsync } from '../../hooks/combineAsync';
 import { useAsync } from '../../hooks/useAsync';
+import { useToast } from '../../components/ui/toast-context';
 import { isValidIsoDate, mondayOf, monthOf, todayIso, weekDays } from '../../lib/dates';
 import { DaySection } from './DaySection';
 import { createProjectLookup } from './projectLookup';
@@ -49,17 +50,21 @@ export function TimesheetPage() {
     setHistoryKey((k) => k + 1);
   };
 
+  const toast = useToast();
   // These reject on failure; the form/row that called them catches via useMutation and shows why.
   const create = async (value: EntryInput) => {
     await createEntry(value);
+    toast.success('Entry added.');
     week.reload();
   };
   const update = async (id: string, patch: EntryPatch) => {
     await updateEntry(id, patch);
+    toast.success('Entry updated.');
     week.reload();
   };
   const remove = async (id: string) => {
     await deleteEntry(id);
+    toast.success('Entry deleted.');
     week.reload();
   };
 
